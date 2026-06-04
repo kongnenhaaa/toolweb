@@ -106,33 +106,74 @@ function renderHistory() {
     });
 }
 
-// Export Excel (CSV)
+// Export Excel (XLS)
 function exportHistoryToExcel() {
     if (state.history.length === 0) {
         showToast('Không có dữ liệu để xuất!', 'error');
         return;
     }
 
-    // Thêm BOM để Excel đọc tiếng Việt UTF-8 không bị lỗi font
-    let csvContent = "\uFEFFCổng,Số Điện Thoại,OTP Đã Nhận,Thời Gian\n";
+    // Tạo nội dung HTML tương thích với Excel, cho phép tuỳ chỉnh màu sắc, độ rộng và giữ số 0
+    let html = `
+        <html xmlns:o="urn:schemas-microsoft-com:office:office"
+              xmlns:x="urn:schemas-microsoft-com:office:excel"
+              xmlns="http://www.w3.org/TR/REC-html40">
+        <head>
+            <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+            <style>
+                table { border-collapse: collapse; font-family: 'Times New Roman', Times, serif; }
+                th { background-color: #1976D2; color: #ffffff; font-weight: bold; border: 1px solid #000000; padding: 10px; font-size: 13pt; text-align: center; }
+                td { border: 1px solid #000000; padding: 8px; font-size: 12pt; text-align: center; vertical-align: middle; }
+                .text-cell { mso-number-format: "\\@"; } /* Định dạng Text, giữ số 0 ở đầu */
+                .title-row { font-size: 18pt; font-weight: bold; color: #D32F2F; text-align: center; height: 50px; vertical-align: middle; }
+            </style>
+        </head>
+        <body>
+            <table>
+                <tr>
+                    <td colspan="4" class="title-row">BÁO CÁO LỊCH SỬ NHẬN OTP</td>
+                </tr>
+                <tr>
+                    <td colspan="4" style="text-align: center; font-style: italic; height: 30px; font-size: 11pt;">Ngày xuất báo cáo: ${new Date().toLocaleString('vi-VN')}</td>
+                </tr>
+                <tr>
+                    <th style="width: 80px;">Cổng</th>
+                    <th style="width: 150px;">Số Điện Thoại</th>
+                    <th style="width: 150px;">OTP Đã Nhận</th>
+                    <th style="width: 200px;">Thời Gian Nhận</th>
+                </tr>
+    `;
     
     state.history.forEach(item => {
         const phone = item.phone || '';
         const otp = item.otp || '';
         const time = item.usedTime || '';
-        csvContent += `${item.id},"${phone}","${otp}","${time}"\n`;
+        
+        html += `
+                <tr>
+                    <td>${item.id}</td>
+                    <td class="text-cell">${phone}</td>
+                    <td class="text-cell" style="color: #2E7D32; font-weight: bold;">${otp}</td>
+                    <td>${time}</td>
+                </tr>`;
     });
 
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    html += `
+            </table>
+        </body>
+        </html>
+    `;
+
+    const blob = new Blob([html], { type: 'application/vnd.ms-excel;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.setAttribute("href", url);
-    link.setAttribute("download", `Lich_Su_OTP_${new Date().toLocaleDateString('vi-VN').replace(/\//g, '-')}.csv`);
+    link.setAttribute("download", `Lich_Su_OTP_${new Date().toLocaleDateString('vi-VN').replace(/\//g, '-')}.xls`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
     
-    showToast('Đã tải xuống file Excel!');
+    showToast('Đã xuất báo cáo Excel thành công!');
 }
 
 // Modal Logic
