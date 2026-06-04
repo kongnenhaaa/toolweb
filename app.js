@@ -312,5 +312,5 @@ document.getElementById('nav-history').addEventListener('click', (e) => {
 // Init
 window.onload = () => {
     fetchPorts();
-    setInterval(fetchPorts, 2000); // Poll every 2 seconds
+    setInterval(fetchPorts, 3000); // Poll every 3 seconds để giảm tải
 };
