@@ -11,7 +11,7 @@ Giao diện Web này hoạt động theo mô hình Client-Server, kết nối tr
 1. **Quản lý tập trung 32 Cổng SIM:** Hiển thị trực quan toàn bộ 32 cổng COM, tự động cập nhật số điện thoại và trạng thái (Online/Lỗi) theo thời gian thực.
 2. **Gửi SMS Lấy OTP nhanh chóng:** 
    - Hỗ trợ gửi SMS ngay trên trình duyệt mà không cần thao tác với phần mềm kỹ thuật.
-   - Hỗ trợ chọn nhanh tổng đài Zalo (8069, 8079) hoặc nhập tổng đài tùy chỉnh.
+   - Hỗ trợ chọn nhanh tổng đài Zalo (8500, 7539) hoặc nhập tổng đài tùy chỉnh.
 3. **Bắt và Hiển thị OTP Tự Động:**
    - Cơ chế Polling liên tục kiểm tra tin nhắn. Khi có OTP mới, hệ thống tự động làm nổi bật (highlight màu vàng) mã OTP ngay cạnh số điện thoại.
 4. **Quản lý Lịch sử thông minh:**
@@ -41,7 +41,7 @@ Giao diện Web này hoạt động theo mô hình Client-Server, kết nối tr
 ### Bước 3: Thao tác Lấy OTP
 1. Tìm một số điện thoại đang rảnh trong danh sách.
 2. Bấm nút **Gửi SMS** màu xanh nước biển.
-3. Chọn tổng đài (VD: 8069) và bấm **Gửi**.
+3. Chọn tổng đài (VD: 8500) và bấm **Gửi**.
 4. Ngồi chờ. Khi tin nhắn phản hồi từ tổng đài về tới Box SIM, mã OTP sẽ tự động hiện lên trên màn hình web.
 5. Sau khi lấy mã nhập vào app thành công, bấm nút **Đã dùng** (màu xanh lá) để hệ thống cất số đó vào Lịch sử.
 

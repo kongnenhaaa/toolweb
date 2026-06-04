@@ -143,7 +143,7 @@ function openSmsModal(portId) {
     document.getElementById('sms-port-name').textContent = port.id;
     document.getElementById('sms-phone-number').textContent = port.phone;
     
-    document.getElementById('sms-recipient-select').value = '8069';
+    document.getElementById('sms-recipient-select').value = '8500';
     document.getElementById('sms-recipient-custom').value = '';
     document.getElementById('sms-recipient-custom').style.display = 'none';
     
