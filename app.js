@@ -16,10 +16,18 @@ async function fetchPorts() {
             data.forEach(serverPort => {
                 const existingPort = state.ports.find(p => p.id === serverPort.id);
                 if (existingPort) {
-                    if (existingPort.hidden) serverPort.hidden = true;
-                    if (existingPort.smsSent) serverPort.smsSent = true;
-                    // Preserve simulated OTP if any
-                    if (existingPort.otp && !serverPort.otp) serverPort.otp = existingPort.otp;
+                    if (existingPort.hidden) {
+                        // Tự động hiện lại cổng nếu C# báo OTP mới hoặc OTP bị reset (thay SIM mới)
+                        if (serverPort.otp !== existingPort.otp) {
+                            serverPort.hidden = false;
+                            serverPort.smsSent = false; // Reset trạng thái gửi SMS
+                        } else {
+                            serverPort.hidden = true;
+                        }
+                    }
+                    if (existingPort.smsSent && !serverPort.hidden) {
+                        serverPort.smsSent = true;
+                    }
                 }
             });
             
