@@ -12,15 +12,21 @@ async function fetchPorts() {
         if (response.ok) {
             const data = await response.json();
             
-            // Merge hidden history state
+            // Merge hidden history state and smsSent status
             data.forEach(serverPort => {
                 const existingPort = state.ports.find(p => p.id === serverPort.id);
-                if (existingPort && existingPort.hidden) {
-                    serverPort.hidden = true;
+                if (existingPort) {
+                    if (existingPort.hidden) serverPort.hidden = true;
+                    if (existingPort.smsSent) serverPort.smsSent = true;
+                    // Preserve simulated OTP if any
+                    if (existingPort.otp && !serverPort.otp) serverPort.otp = existingPort.otp;
                 }
             });
             
-            state.ports = data;
+            // Retain locally created test ports
+            const testPorts = state.ports.filter(p => p.isTest);
+            state.ports = [...data, ...testPorts];
+            
             renderPorts();
         }
     } catch (error) {
@@ -40,6 +46,13 @@ function renderPorts() {
         return;
     }
 
+    // Sort ports by COM number (e.g. COM1, COM2, COM10)
+    visiblePorts.sort((a, b) => {
+        const numA = parseInt(a.id.replace(/\D/g, '')) || 0;
+        const numB = parseInt(b.id.replace(/\D/g, '')) || 0;
+        return numA - numB;
+    });
+
     visiblePorts.forEach(port => {
         const row = document.createElement('div');
         row.className = 'grid-row';
@@ -49,7 +62,9 @@ function renderPorts() {
             '<div class="status-indicator online"></div>' : 
             '<div class="status-indicator" style="background: red;"></div>';
 
-        let otpContent = '<span style="color: var(--text-muted)">Đang chờ...</span>';
+        let otpContent = port.smsSent ? 
+            '<span style="color: #f39c12">Đang chờ mã...</span>' : 
+            '<span style="color: var(--text-muted)">Chưa gửi tin nhắn</span>';
         let actionButtons = `
             <button class="btn btn-primary" onclick="openSmsModal('${port.id}')" title="Gửi SMS Lấy OTP">
                 <i data-lucide="send"></i> Gửi SMS
@@ -68,7 +83,7 @@ function renderPorts() {
         row.innerHTML = `
             <div class="col-status">${statusDot}</div>
             <div class="col-port">${port.id}</div>
-            <div class="col-phone">${port.phone.replace(/(\d{4})(\d{3})(\d{3})/, '$1 $2 $3')}</div>
+            <div class="col-phone">${port.phone ? port.phone.replace(/(\d{4})(\d{3})(\d{3})/, '$1 $2 $3') : '<span style="color:gray; font-style:italic">Trống</span>'}</div>
             <div class="col-tkc">${port.balance || 'N/A'}</div>
             <div class="col-otp">${otpContent}</div>
             <div class="col-actions">
@@ -98,7 +113,7 @@ function renderHistory() {
 
         row.innerHTML = `
             <div class="col-port">${item.id}</div>
-            <div class="col-phone">${item.phone.replace(/(\d{4})(\d{3})(\d{3})/, '$1 $2 $3')}</div>
+            <div class="col-phone">${item.phone ? item.phone.replace(/(\d{4})(\d{3})(\d{3})/, '$1 $2 $3') : '<span style="color:gray; font-style:italic">Trống</span>'}</div>
             <div class="col-otp"><span style="color: var(--success); font-weight: bold;">${item.otp}</span></div>
             <div class="col-time">${item.usedTime}</div>
         `;
@@ -212,6 +227,9 @@ function closeModal(modalId) {
 
 // Execute actions
 async function executeSendSms() {
+    const actionPortId = state.currentActionPortId;
+    if (!actionPortId) return;
+
     let recipient = document.getElementById('sms-recipient-select').value;
     if (recipient === 'custom') {
         recipient = document.getElementById('sms-recipient-custom').value;
@@ -223,20 +241,36 @@ async function executeSendSms() {
     }
     
     const content = document.getElementById('sms-content').value;
+
+    // Xử lý cổng mô phỏng (Test)
+    if (actionPortId.startsWith('COM_TEST')) {
+        const port = state.ports.find(p => p.id === actionPortId);
+        if (port) port.smsSent = true;
+        renderPorts();
+        showToast(`[TEST] Đã gửi lệnh SMS từ ${actionPortId} đến ${recipient}`);
+        closeModal('sms-modal');
+        
+        // Mô phỏng mã OTP về sau 3 giây
+        simulateOtpArrival(actionPortId, content.toUpperCase().includes('ZALO'));
+        return;
+    }
     
     try {
         const response = await fetch('http://localhost:5000/api/sms', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                PortId: state.currentActionPortId,
+                PortId: actionPortId,
                 Recipient: recipient,
                 Content: content
             })
         });
         
         if (response.ok) {
-            showToast(`Đã gửi lệnh SMS từ ${state.currentActionPortId} đến ${recipient}`);
+            const port = state.ports.find(p => p.id === actionPortId);
+            if (port) port.smsSent = true;
+            renderPorts();
+            showToast(`Đã gửi lệnh SMS từ ${actionPortId} đến ${recipient}`);
         } else {
             showToast('Lỗi khi gửi SMS!', 'error');
         }
@@ -292,15 +326,22 @@ function simulateOtpArrival(portId, isZalo = false) {
 }
 
 function simulateIncomingOtp() {
-    // Pick a random visible port without OTP
-    const available = state.ports.filter(p => !p.hidden && !p.otp);
-    if(available.length > 0) {
-        const randomPort = available[Math.floor(Math.random() * available.length)];
-        simulateOtpArrival(randomPort.id);
-        showToast(`Đang giả lập tin nhắn đến ${randomPort.id}...`);
-    } else {
-        showToast('Tất cả các cổng đã có OTP hoặc đã dùng.');
-    }
+    // Tạo một cổng mô phỏng mới
+    const testId = `COM_TEST_${Math.floor(100 + Math.random() * 900)}`;
+    const newTestPort = {
+        id: testId,
+        phone: `0999${Math.floor(100000 + Math.random() * 900000)}`,
+        status: 'online',
+        balance: '10000',
+        network: 'TEST',
+        isTest: true,
+        smsSent: false,
+        hidden: false,
+        otp: null
+    };
+    state.ports.push(newTestPort);
+    renderPorts();
+    showToast(`Đã thêm cổng mô phỏng ${testId}. Vui lòng bấm Gửi SMS để test tiếp.`);
 }
 
 // Toast notification
