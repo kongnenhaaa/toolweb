@@ -69,6 +69,7 @@ function renderPorts() {
             <div class="col-status">${statusDot}</div>
             <div class="col-port">${port.id}</div>
             <div class="col-phone">${port.phone.replace(/(\d{4})(\d{3})(\d{3})/, '$1 $2 $3')}</div>
+            <div class="col-tkc">${port.balance || 'N/A'}</div>
             <div class="col-otp">${otpContent}</div>
             <div class="col-actions">
                 ${actionButtons}
