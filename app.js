@@ -142,6 +142,9 @@ function renderPorts() {
             <button class="btn btn-primary" onclick="openSmsModal('${port.id}')" title="Gửi SMS Lấy OTP">
                 <i data-lucide="send"></i> Gửi SMS
             </button>
+            <button class="btn btn-outline" onclick="checkBalance('${port.id}')" title="Kiểm tra số dư">
+                <i data-lucide="dollar-sign"></i> Kiểm tra số dư
+            </button>
         `;
 
         if (port.otp) {
@@ -403,6 +406,26 @@ async function executeSendSms() {
     closeModal('sms-modal');
 }
 
+window.checkBalance = async function(portId) {
+    if (portId.startsWith('COM_TEST')) {
+        showToast(`[TEST] Đã gửi lệnh kiểm tra số dư cho cổng ${portId}`);
+        return;
+    }
+
+    try {
+        const commandRef = db.ref('commands').push();
+        await commandRef.set({
+            portId: portId,
+            recipient: 'USSD',
+            content: 'BALANCE',
+            timestamp: firebase.database.ServerValue.TIMESTAMP
+        });
+        showToast(`Đã gửi lệnh kiểm tra số dư cho cổng ${portId}`);
+    } catch (error) {
+        showToast('Không thể đẩy lệnh lên Firebase!', 'error');
+    }
+}
+
 // Mark as Used
 function markAsUsed(portId) {
     const portIndex = state.ports.findIndex(p => p.id === portId);
@@ -597,5 +620,12 @@ function checkConnectionStatus() {
         indicator.className = 'status-indicator online';
         indicator.style.background = '';
         textSpan.textContent = `Hệ thống trực tuyến (${visibleCount} Cổng)`;
+    }
+}
+
+// Đóng modal khi nhấn ra ngoài
+window.onclick = function(event) {
+    if (event.target.classList.contains('modal-overlay')) {
+        closeModal(event.target.id);
     }
 }
