@@ -22,11 +22,26 @@ function fetchPorts() {
             // Convert to array and filter out nulls/undefined if any
             const portsArray = Object.values(data).filter(p => p);
             
+            const hiddenPorts = JSON.parse(localStorage.getItem('gsm_hidden_ports') || '{}');
+
             // Merge hidden history state and smsSent status
             portsArray.forEach(serverPort => {
                 const existingPort = state.ports.find(p => p.id === serverPort.id);
+                
+                // Apply hidden state from LocalStorage
+                if (hiddenPorts[serverPort.id]) {
+                    if (serverPort.otp && serverPort.otp !== hiddenPorts[serverPort.id]) {
+                        serverPort.hidden = false;
+                        serverPort.smsSent = false;
+                        delete hiddenPorts[serverPort.id];
+                        localStorage.setItem('gsm_hidden_ports', JSON.stringify(hiddenPorts));
+                    } else {
+                        serverPort.hidden = true;
+                    }
+                }
+
                 if (existingPort) {
-                    if (existingPort.hidden) {
+                    if (existingPort.hidden && !hiddenPorts[serverPort.id]) {
                         // Tự động hiện lại cổng nếu C# báo OTP mới hoặc OTP bị reset (thay SIM mới)
                         if (serverPort.otp !== existingPort.otp) {
                             serverPort.hidden = false;
@@ -321,6 +336,14 @@ function markAsUsed(portId) {
                 usedTime: new Date().toLocaleTimeString('vi-VN')
             });
 
+            // Save to localStorage
+            localStorage.setItem('gsm_history', JSON.stringify(state.history));
+            
+            // Save hidden port state
+            const hiddenPorts = JSON.parse(localStorage.getItem('gsm_hidden_ports') || '{}');
+            hiddenPorts[portId] = port.otp || true;
+            localStorage.setItem('gsm_hidden_ports', JSON.stringify(hiddenPorts));
+
             setTimeout(() => {
                 port.hidden = true; // hide from main view
                 renderPorts();
@@ -417,6 +440,14 @@ document.getElementById('nav-history').addEventListener('click', (e) => {
 
 // Init
 window.onload = () => {
+    // Load history from localStorage
+    try {
+        const savedHistory = localStorage.getItem('gsm_history');
+        if (savedHistory) {
+            state.history = JSON.parse(savedHistory);
+        }
+    } catch(e) {}
+
     fetchPorts();
     
     // Firebase on('value') tự động realtime nên không cần setInterval hay SSE nữa

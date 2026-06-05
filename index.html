@@ -32,10 +32,7 @@
                     Cài đặt
                 </a>
             </nav>
-            <div class="system-status">
-                <div class="status-indicator online"></div>
-                <span>Hệ thống trực tuyến (32 Cổng)</span>
-            </div>
+
         </aside>
 
         <!-- Main Content -->
@@ -43,6 +40,10 @@
             <header class="top-bar">
                 <h1 id="page-title">Quản lý Cổng SIM</h1>
                 <div class="actions">
+                    <div class="system-status" style="display: flex; align-items: center; gap: 8px; padding: 8px 16px; background: rgba(255,255,255,0.05); border: 1px solid var(--border-color); border-radius: 6px; font-size: 13px;">
+                        <div class="status-indicator online"></div>
+                        <span style="color: var(--text-main); font-weight: 500;">Đang kết nối...</span>
+                    </div>
                     <button class="btn btn-secondary" onclick="manualRefresh()">
                         <i data-lucide="refresh-cw"></i> Làm mới
                     </button>
