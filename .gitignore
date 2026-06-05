@@ -1,0 +1,16 @@
+# Node.js
+node_modules/
+node-v*/
+node*.zip
+*.exe
+
+# Firebase
+.firebase/
+firebase-debug.log*
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Scripts
+*.bat

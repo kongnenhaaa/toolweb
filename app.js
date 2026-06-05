@@ -5,15 +5,23 @@ const state = {
     currentActionPortId: null
 };
 
-// Fetch real data from C# API
-async function fetchPorts() {
-    try {
-        const response = await fetch('http://localhost:5000/api/ports');
-        if (response.ok) {
-            const data = await response.json();
+// Firebase configuration
+const firebaseConfig = {
+    databaseURL: "https://toolweb-c7702-default-rtdb.firebaseio.com/"
+};
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+
+// Fetch real data from Firebase
+function fetchPorts() {
+    db.ref('ports').on('value', (snapshot) => {
+        const data = snapshot.val();
+        if (data) {
+            // Convert to array and filter out nulls/undefined if any
+            const portsArray = Object.values(data).filter(p => p);
             
             // Merge hidden history state and smsSent status
-            data.forEach(serverPort => {
+            portsArray.forEach(serverPort => {
                 const existingPort = state.ports.find(p => p.id === serverPort.id);
                 if (existingPort) {
                     if (existingPort.hidden) {
@@ -33,13 +41,17 @@ async function fetchPorts() {
             
             // Retain locally created test ports
             const testPorts = state.ports.filter(p => p.isTest);
-            state.ports = [...data, ...testPorts];
+            state.ports = [...portsArray, ...testPorts];
             
             renderPorts();
+        } else {
+            // Không có dữ liệu
+            state.ports = state.ports.filter(p => p.isTest);
+            renderPorts();
         }
-    } catch (error) {
-        console.error('Lỗi khi tải dữ liệu từ máy chủ:', error);
-    }
+    }, (error) => {
+        console.error('Lỗi khi tải dữ liệu từ Firebase:', error);
+    });
 }
 
 // Render Ports
@@ -264,26 +276,21 @@ async function executeSendSms() {
     }
     
     try {
-        const response = await fetch('http://localhost:5000/api/sms', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                PortId: actionPortId,
-                Recipient: recipient,
-                Content: content
-            })
+        // Đẩy lệnh lên Firebase để phần mềm C# nhận
+        const commandRef = db.ref('commands').push();
+        await commandRef.set({
+            portId: actionPortId,
+            recipient: recipient,
+            content: content,
+            timestamp: firebase.database.ServerValue.TIMESTAMP
         });
         
-        if (response.ok) {
-            const port = state.ports.find(p => p.id === actionPortId);
-            if (port) port.smsSent = true;
-            renderPorts();
-            showToast(`Đã gửi lệnh SMS từ ${actionPortId} đến ${recipient}`);
-        } else {
-            showToast('Lỗi khi gửi SMS!', 'error');
-        }
+        const port = state.ports.find(p => p.id === actionPortId);
+        if (port) port.smsSent = true;
+        renderPorts();
+        showToast(`Đã gửi lệnh SMS từ ${actionPortId} đến ${recipient}`);
     } catch (error) {
-        showToast('Không thể kết nối tới máy chủ!', 'error');
+        showToast('Không thể đẩy lệnh lên Firebase!', 'error');
     }
     
     closeModal('sms-modal');
@@ -403,28 +410,17 @@ document.getElementById('nav-history').addEventListener('click', (e) => {
 // Init
 window.onload = () => {
     fetchPorts();
-    setInterval(fetchPorts, 3000); // Poll every 3 seconds để giảm tải
     
-    // Khởi tạo SSE để nhận OTP real-time
-    const evtSource = new EventSource("http://localhost:5000/api/sse");
-    evtSource.addEventListener("otp_update", (e) => {
-        try {
-            const data = JSON.parse(e.data);
-            const port = state.ports.find(p => p.id === data.portId);
-            if (port) {
-                if (port.hidden) {
-                    port.hidden = false;
-                    port.smsSent = false;
-                }
-                port.otp = data.otp;
-                renderPorts();
-                showToast(`Có mã OTP mới ở cổng ${data.portId}!`);
-            } else {
-                // Nếu cổng chưa có trong state thì gọi lại fetch để lấy đầy đủ thông tin
-                fetchPorts();
+    // Firebase on('value') tự động realtime nên không cần setInterval hay SSE nữa
+    
+    // Lắng nghe thông báo OTP mới từ Firebase
+    db.ref('ports').on('child_changed', (snapshot) => {
+        const port = snapshot.val();
+        if (port && port.otp) {
+            const existingPort = state.ports.find(p => p.id === port.id);
+            if (!existingPort || existingPort.otp !== port.otp) {
+                showToast(`Có mã OTP mới ở cổng ${port.id}!`);
             }
-        } catch (err) {
-            console.error("Lỗi parse SSE data:", err);
         }
     });
 };
