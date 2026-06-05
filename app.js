@@ -404,4 +404,27 @@ document.getElementById('nav-history').addEventListener('click', (e) => {
 window.onload = () => {
     fetchPorts();
     setInterval(fetchPorts, 3000); // Poll every 3 seconds để giảm tải
+    
+    // Khởi tạo SSE để nhận OTP real-time
+    const evtSource = new EventSource("http://localhost:5000/api/sse");
+    evtSource.addEventListener("otp_update", (e) => {
+        try {
+            const data = JSON.parse(e.data);
+            const port = state.ports.find(p => p.id === data.portId);
+            if (port) {
+                if (port.hidden) {
+                    port.hidden = false;
+                    port.smsSent = false;
+                }
+                port.otp = data.otp;
+                renderPorts();
+                showToast(`Có mã OTP mới ở cổng ${data.portId}!`);
+            } else {
+                // Nếu cổng chưa có trong state thì gọi lại fetch để lấy đầy đủ thông tin
+                fetchPorts();
+            }
+        } catch (err) {
+            console.error("Lỗi parse SSE data:", err);
+        }
+    });
 };
