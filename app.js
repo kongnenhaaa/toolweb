@@ -69,8 +69,14 @@ function fetchPorts() {
             const portsArray = Object.values(data).filter(p => p);
             
             portsArray.forEach(newPort => {
+                const existingPort = state.ports.find(p => p.id === newPort.id);
+
+                // Giữ lại OTP trên giao diện nếu C# lỡ xoá sớm (nhưng SĐT vẫn giữ nguyên)
+                if (!newPort.otp && existingPort && existingPort.otp && existingPort.phone === newPort.phone) {
+                    newPort.otp = existingPort.otp;
+                }
+
                 if (newPort.otp) {
-                    const existingPort = state.ports.find(p => p.id === newPort.id);
                     if (!existingPort || existingPort.otp !== newPort.otp) {
                         scheduleAutoHistory(newPort.id);
                     }
@@ -441,10 +447,14 @@ async function executeSendSms() {
         
         const port = state.ports.find(p => p.id === actionPortId);
         if (port && !port.isTest) {
+            // Xoá OTP cũ hiển thị trên trình duyệt để chuyển sang trạng thái "Đang chờ mã..."
+            port.otp = null;
+            
             db.ref(`web_states/ports/${actionPortId}`).update({
                 smsSent: true
             });
         } else if (port) {
+            port.otp = null;
             port.smsSent = true;
             renderPorts();
         }
