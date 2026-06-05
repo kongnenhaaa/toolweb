@@ -228,10 +228,17 @@ function renderHistory() {
             <div class="col-phone">${item.phone ? item.phone.replace(/(\d{4})(\d{3})(\d{3})/, '$1 $2 $3') : '<span style="color:gray; font-style:italic">Trống</span>'}</div>
             <div class="col-otp"><span style="color: var(--success); font-weight: bold;">${item.otp}</span></div>
             <div class="col-time">${item.usedTime}</div>
+            <div class="col-actions">
+                <button class="btn btn-primary" onclick="restoreFromHistory('${item.id}', '${item.usedTime}')" title="Khôi phục trạng thái hoạt động">
+                    <i data-lucide="rotate-ccw"></i> Khôi phục
+                </button>
+            </div>
         `;
 
         container.appendChild(row);
     });
+
+    lucide.createIcons();
 }
 
 // Export Excel (XLS)
@@ -420,6 +427,34 @@ function markAsUsed(portId) {
             }, 400); // wait for animation
         }
     }
+}
+
+// Restore from History
+function restoreFromHistory(portId, usedTime) {
+    // Xóa trạng thái ẩn của cổng
+    const hiddenPorts = JSON.parse(localStorage.getItem('gsm_hidden_ports') || '{}');
+    if (hiddenPorts[portId]) {
+        delete hiddenPorts[portId];
+        localStorage.setItem('gsm_hidden_ports', JSON.stringify(hiddenPorts));
+    }
+    
+    // Cập nhật state local
+    const port = state.ports.find(p => p.id === portId);
+    if (port) {
+        port.hidden = false;
+        port.smsSent = false;
+    }
+    
+    // Xóa entry khỏi lịch sử
+    const indexToRemove = state.history.findIndex(h => h.id === portId && h.usedTime === usedTime);
+    if (indexToRemove > -1) {
+        state.history.splice(indexToRemove, 1);
+        localStorage.setItem('gsm_history', JSON.stringify(state.history));
+        renderHistory();
+    }
+    
+    renderPorts();
+    showToast(`Đã khôi phục cổng ${portId} về trạng thái đang hoạt động.`);
 }
 
 // Simulation helpers
