@@ -605,12 +605,16 @@ function showToast(message, type = 'success') {
 }
 
 // Navigation
+document.getElementById('logo-home').addEventListener('click', () => {
+    document.getElementById('nav-active').click();
+});
+
 document.getElementById('nav-active').addEventListener('click', (e) => {
     e.preventDefault();
     document.getElementById('nav-active').classList.add('active');
     document.getElementById('nav-history').classList.remove('active');
     
-    document.getElementById('active-view').style.display = 'block';
+    document.getElementById('active-view').style.display = 'flex';
     document.getElementById('history-view').style.display = 'none';
     document.getElementById('page-title').textContent = 'Quản lý Cổng SIM';
     renderPorts();
@@ -622,7 +626,7 @@ document.getElementById('nav-history').addEventListener('click', (e) => {
     document.getElementById('nav-active').classList.remove('active');
     
     document.getElementById('active-view').style.display = 'none';
-    document.getElementById('history-view').style.display = 'block';
+    document.getElementById('history-view').style.display = 'flex';
     document.getElementById('page-title').textContent = 'Lịch sử OTP';
     renderHistory();
 });
