@@ -131,6 +131,13 @@ function applyWebStates() {
             } else {
                 shouldHide = true;
             }
+        } else if (webState.smsSent) {
+            // Đang chờ mã nhưng chưa có hiddenOtp
+            // Nếu C# cập nhật SĐT mới (thay SIM) thì xoá trạng thái chờ mã
+            if (port.phone && webState.phone && port.phone !== webState.phone && port.phone !== 'N/A' && port.phone !== 'Unknown') {
+                db.ref(`web_states/ports/${port.id}`).remove();
+                isSmsSent = false;
+            }
         }
 
         port.hidden = shouldHide;
@@ -207,6 +214,14 @@ function renderPorts() {
                 ${isChecking ? '<span class="spinner"></span> Đang kiểm tra...' : '<i data-lucide="dollar-sign"></i> Kiểm tra số dư'}
             </button>
         `;
+
+        if (port.smsSent && !port.otp) {
+            actionButtons += `
+            <button class="btn btn-outline" onclick="cancelSmsWait('${port.id}')" title="Huỷ trạng thái chờ mã" style="padding: 0 8px;">
+                <i data-lucide="x-circle"></i>
+            </button>
+            `;
+        }
 
         if (port.otp) {
             otpContent = `<span class="otp-badge">${port.otp}</span>`;
@@ -451,7 +466,8 @@ async function executeSendSms() {
             port.otp = null;
             
             db.ref(`web_states/ports/${actionPortId}`).update({
-                smsSent: true
+                smsSent: true,
+                phone: port.phone || 'NONE'
             });
         } else if (port) {
             port.otp = null;
@@ -504,6 +520,11 @@ window.checkBalance = async function(portId) {
         renderPorts();
         showToast('Không thể đẩy lệnh lên Firebase!', 'error');
     }
+}
+
+window.cancelSmsWait = function(portId) {
+    db.ref(`web_states/ports/${portId}`).remove();
+    showToast(`Đã huỷ trạng thái chờ mã cho cổng ${portId}`);
 }
 
 window.checkAllBalance = async function() {
