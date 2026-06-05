@@ -181,7 +181,7 @@ function renderPorts() {
         const row = document.createElement('div');
         row.className = 'grid-row';
         if (port.smsSent) {
-            row.classList.add('row-highlight-red');
+            row.classList.add('row-highlight-warning');
         }
         row.id = `row-${port.id}`;
 

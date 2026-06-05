@@ -320,13 +320,13 @@ h1 {
     background: rgba(255, 255, 255, 0.03);
 }
 
-.grid-row.row-highlight-red {
-    background: rgba(239, 68, 68, 0.15);
-    border-left: 2px solid var(--danger);
+.grid-row.row-highlight-warning {
+    background: rgba(245, 158, 11, 0.15); /* Vàng cam nhẹ */
+    border-left: 3px solid var(--warning);
 }
 
-.grid-row.row-highlight-red:hover {
-    background: rgba(239, 68, 68, 0.25);
+.grid-row.row-highlight-warning:hover {
+    background: rgba(245, 158, 11, 0.25);
 }
 
 /* Columns */
@@ -717,9 +717,9 @@ h1 {
         background: rgba(255, 255, 255, 0.03);
     }
 
-    .grid-row.row-highlight-red {
-        border-color: rgba(239, 68, 68, 0.4);
-        border-left: 3px solid var(--danger);
+    .grid-row.row-highlight-warning {
+        border-color: rgba(245, 158, 11, 0.4);
+        border-left: 3px solid var(--warning);
     }
 
     .col-status {
