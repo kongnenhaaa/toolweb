@@ -11,15 +11,8 @@ let pendingBalanceChecks = new Set();
 let autoHistoryTimeouts = {};
 
 function scheduleAutoHistory(portId) {
-    if (autoHistoryTimeouts[portId]) {
-        clearTimeout(autoHistoryTimeouts[portId]);
-    }
-    autoHistoryTimeouts[portId] = setTimeout(() => {
-        const port = state.ports.find(p => p.id === portId);
-        if (port && port.otp && !port.hidden) {
-            markAsUsed(portId);
-        }
-    }, 10000);
+    // Đã bỏ tính năng 10s tự chuyển qua lịch sử.
+    // Giờ chỉ chuyển khi người dùng bấm "Đã dùng".
 }
 
 // Âm thanh thông báo OTP (Web Audio API - không cần file ngoài)
@@ -221,15 +214,18 @@ function renderPorts() {
                 <button class="btn btn-success" onclick="markAsUsed('${port.id}')">
                     <i data-lucide="check-circle"></i> Đã dùng
                 </button>
+                <button class="btn btn-outline" onclick="cancelSmsWait('${port.id}')" title="Làm mới trạng thái">
+                    <i data-lucide="refresh-cw"></i> Làm mới
+                </button>
+            `;
+        } else {
+            // Luôn hiển thị button huỷ chờ
+            actionButtons += `
+                <button class="btn btn-outline" onclick="cancelSmsWait('${port.id}')" title="Huỷ trạng thái" style="padding: 0 8px;">
+                    <i data-lucide="x-circle"></i>
+                </button>
             `;
         }
-
-        // Luôn hiển thị button huỷ chờ
-        actionButtons += `
-            <button class="btn btn-outline" onclick="cancelSmsWait('${port.id}')" title="Huỷ trạng thái" style="padding: 0 8px;">
-                <i data-lucide="x-circle"></i>
-            </button>
-        `;
 
         row.innerHTML = `
             <div class="col-status">${statusDot}</div>
@@ -526,8 +522,9 @@ window.cancelSmsWait = function(portId) {
     
     // Xoá OTP trên giao diện nếu đang có
     const port = state.ports.find(p => p.id === portId);
-    if (port && port.otp) {
-        port.otp = null;
+    if (port) {
+        if (port.otp) port.otp = null;
+        port.smsSent = false;
         renderPorts();
     }
     
@@ -544,9 +541,8 @@ window.cancelAllSmsWait = function() {
     showToast(`Đang huỷ trạng thái chờ cho ${visiblePorts.length} cổng...`);
     visiblePorts.forEach(port => {
         db.ref(`web_states/ports/${port.id}`).remove();
-        if (port.otp) {
-            port.otp = null;
-        }
+        if (port.otp) port.otp = null;
+        port.smsSent = false;
     });
     renderPorts();
     showToast(`Đã huỷ trạng thái cho ${visiblePorts.length} cổng`);
