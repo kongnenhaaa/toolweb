@@ -8,6 +8,19 @@ const state = {
 let lastSyncTime = 0;
 let globalWebStates = {};
 let pendingBalanceChecks = new Set();
+let autoHistoryTimeouts = {};
+
+function scheduleAutoHistory(portId) {
+    if (autoHistoryTimeouts[portId]) {
+        clearTimeout(autoHistoryTimeouts[portId]);
+    }
+    autoHistoryTimeouts[portId] = setTimeout(() => {
+        const port = state.ports.find(p => p.id === portId);
+        if (port && port.otp && !port.hidden) {
+            markAsUsed(portId);
+        }
+    }, 10000);
+}
 
 // Âm thanh thông báo OTP (Web Audio API - không cần file ngoài)
 function playNotificationSound() {
@@ -54,6 +67,15 @@ function fetchPorts() {
         if (data) {
             // Convert to array and filter out nulls/undefined if any
             const portsArray = Object.values(data).filter(p => p);
+            
+            portsArray.forEach(newPort => {
+                if (newPort.otp) {
+                    const existingPort = state.ports.find(p => p.id === newPort.id);
+                    if (!existingPort || existingPort.otp !== newPort.otp) {
+                        scheduleAutoHistory(newPort.id);
+                    }
+                }
+            });
             
             // Retain locally created test ports
             const testPorts = state.ports.filter(p => p.isTest);
@@ -489,6 +511,10 @@ window.checkAllBalance = async function() {
 
 // Mark as Used
 function markAsUsed(portId) {
+    if (autoHistoryTimeouts[portId]) {
+        clearTimeout(autoHistoryTimeouts[portId]);
+        delete autoHistoryTimeouts[portId];
+    }
     const portIndex = state.ports.findIndex(p => p.id === portId);
     if (portIndex > -1) {
         const port = state.ports[portIndex];
@@ -554,6 +580,7 @@ function simulateOtpArrival(portId, isZalo = false) {
         const port = state.ports.find(p => p.id === portId);
         if (port && !port.hidden) {
             port.otp = isZalo ? Math.floor(1000 + Math.random() * 9000).toString() : Math.floor(100000 + Math.random() * 900000).toString();
+            scheduleAutoHistory(portId);
             renderPorts();
             showToast(`Có mã OTP mới ở cổng ${portId}!`);
         }
