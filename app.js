@@ -28,8 +28,24 @@ function fetchPorts() {
             portsArray.forEach(serverPort => {
                 const existingPort = state.ports.find(p => p.id === serverPort.id);
                 
-                // Apply hidden state from LocalStorage
-                if (hiddenPorts[serverPort.id]) {
+                // Tự động phát hiện thay SIM (số điện thoại thay đổi và có số mới hợp lệ)
+                const isNewSim = existingPort && 
+                               existingPort.phone && 
+                               serverPort.phone && 
+                               existingPort.phone !== serverPort.phone && 
+                               serverPort.phone !== 'N/A' && 
+                               serverPort.phone !== 'Unknown';
+
+                // Nếu có SIM mới được cắm vào, xóa trạng thái ẩn để nó hiện lên lại
+                if (isNewSim) {
+                    if (hiddenPorts[serverPort.id]) {
+                        delete hiddenPorts[serverPort.id];
+                        localStorage.setItem('gsm_hidden_ports', JSON.stringify(hiddenPorts));
+                    }
+                    serverPort.hidden = false;
+                    serverPort.smsSent = false;
+                } else if (hiddenPorts[serverPort.id]) {
+                    // Cùng một SIM, kiểm tra xem có OTP mới không
                     if (serverPort.otp && serverPort.otp !== hiddenPorts[serverPort.id]) {
                         serverPort.hidden = false;
                         serverPort.smsSent = false;
@@ -40,9 +56,9 @@ function fetchPorts() {
                     }
                 }
 
-                if (existingPort) {
+                if (existingPort && !isNewSim) {
                     if (existingPort.hidden && !hiddenPorts[serverPort.id]) {
-                        // Tự động hiện lại cổng nếu C# báo OTP mới hoặc OTP bị reset (thay SIM mới)
+                        // Tự động hiện lại cổng nếu C# báo OTP mới hoặc OTP bị reset
                         if (serverPort.otp !== existingPort.otp) {
                             serverPort.hidden = false;
                             serverPort.smsSent = false; // Reset trạng thái gửi SMS
