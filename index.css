@@ -541,65 +541,138 @@ h1 {
 
 /* Responsive Mobile Styles */
 @media (max-width: 768px) {
-    .app-container {
-        flex-direction: column;
+    body {
+        overflow: auto;
     }
 
+    .app-container {
+        flex-direction: column;
+        height: auto;
+        min-height: 100dvh;
+    }
+
+    /* === SIDEBAR → Sticky top nav === */
     .sidebar {
         width: 100%;
         flex-direction: row;
         border-right: none;
         border-bottom: 1px solid var(--border-color);
-        padding: 12px 16px;
+        padding: 10px 16px;
         align-items: center;
         justify-content: space-between;
-        flex-wrap: wrap;
-        gap: 12px;
+        flex-wrap: nowrap;
+        gap: 8px;
+        background: rgba(15, 16, 22, 0.95);
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+        position: sticky;
+        top: 0;
+        z-index: 50;
     }
 
     .logo {
         padding: 0;
-        font-size: 20px;
+        font-size: 18px;
+        gap: 8px;
+        flex-shrink: 0;
+    }
+
+    .logo-icon {
+        width: 22px;
+        height: 22px;
     }
 
     .nav-menu {
         flex-direction: row;
         padding: 0;
-        gap: 10px;
+        gap: 4px;
         overflow-x: auto;
         white-space: nowrap;
-        flex: unset;
-        width: 100%;
+        flex: 1;
+        width: auto;
+        justify-content: flex-end;
     }
 
     .nav-menu::-webkit-scrollbar {
         display: none;
     }
 
+    .nav-item {
+        padding: 8px 12px;
+        font-size: 13px;
+        border-radius: 6px;
+        gap: 6px;
+    }
+
+    .nav-item i {
+        width: 16px;
+        height: 16px;
+    }
+
+    /* === TOP BAR === */
     .top-bar {
         flex-direction: column;
-        align-items: flex-start;
-        gap: 16px;
+        align-items: stretch;
+        gap: 12px;
         padding: 16px;
+    }
+
+    h1 {
+        font-size: 22px;
+        text-align: center;
     }
 
     .actions {
         width: 100%;
-        flex-wrap: wrap;
-        gap: 10px;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
     }
 
-    .system-status {
-        width: 100%;
+    .actions .system-status {
+        grid-column: 1 / -1;
         justify-content: center;
+        font-size: 12px !important;
+        padding: 6px 12px !important;
+    }
+
+    .actions .btn {
+        font-size: 12px;
+        padding: 8px 10px;
+        justify-content: center;
+        gap: 6px;
+    }
+
+    .actions .btn i {
+        width: 14px;
+        height: 14px;
     }
 
     .user-profile {
         display: none;
     }
 
+    /* === FILTER BAR (Chia nhóm) === */
+    #port-filters {
+        flex-direction: column !important;
+        gap: 10px !important;
+        padding: 10px 12px !important;
+        margin-bottom: 12px !important;
+    }
+
+    #port-filters .form-group {
+        width: 100%;
+    }
+
+    #port-filters input,
+    #port-filters select {
+        flex: 1;
+        min-width: 0;
+    }
+
+    /* === CONTENT AREA === */
     .content-area {
-        padding: 0 16px 16px 16px;
+        padding: 0 12px 12px 12px;
         flex: 1;
         min-height: 0;
         display: flex;
@@ -613,6 +686,7 @@ h1 {
         min-height: 0;
         background: transparent;
         border: none;
+        border-radius: 0;
     }
 
     .grid-header {
@@ -622,60 +696,223 @@ h1 {
     .grid-body {
         flex: 1;
         overflow-y: auto;
-        padding-bottom: 20px;
+        padding-bottom: 24px;
     }
 
+    /* === PORT CARD (Mobile) === */
     .grid-row {
         flex-direction: column;
-        align-items: flex-start;
-        padding: 16px;
-        gap: 8px;
+        align-items: stretch;
+        padding: 0;
+        gap: 0;
         position: relative;
         border: 1px solid var(--border-color);
-        border-radius: 8px;
+        border-radius: 12px;
         margin-bottom: 12px;
         background: rgba(255, 255, 255, 0.03);
+        overflow: hidden;
+    }
+
+    .grid-row:hover {
+        background: rgba(255, 255, 255, 0.03);
+    }
+
+    .grid-row.row-highlight-red {
+        border-color: rgba(239, 68, 68, 0.4);
+        border-left: 3px solid var(--danger);
     }
 
     .col-status {
         position: absolute;
-        top: 16px;
-        right: 16px;
+        top: 14px;
+        right: 14px;
         width: auto;
     }
 
-    .col-port, .col-phone, .col-tkc, .col-otp, .col-time {
+    .col-port {
         width: 100%;
-        font-size: 15px;
+        padding: 14px 14px 0 14px;
+        font-size: 16px;
+        font-weight: 700;
+        color: var(--primary-color);
     }
-    
-    .col-port::before { content: "Cổng: "; color: var(--text-muted); font-size: 13px; margin-right: 4px; }
-    .col-phone::before { content: "SĐT: "; color: var(--text-muted); font-size: 13px; margin-right: 4px; }
-    .col-tkc::before { content: "Số dư: "; color: var(--text-muted); font-size: 13px; margin-right: 4px; }
-    .col-otp::before { content: "OTP: "; color: var(--text-muted); font-size: 13px; margin-right: 4px; }
-    .col-time::before { content: "Thời gian: "; color: var(--text-muted); font-size: 13px; margin-right: 4px; }
 
+    .col-port::before { display: none; }
+
+    .col-phone {
+        width: 100%;
+        padding: 4px 14px 0 14px;
+        font-size: 18px;
+        font-weight: 600;
+    }
+
+    .col-phone::before {
+        content: "SĐT: ";
+        color: var(--text-muted);
+        font-size: 12px;
+        font-weight: 400;
+        margin-right: 4px;
+    }
+
+    .col-tkc {
+        width: 100%;
+        padding: 4px 14px 0 14px;
+        font-size: 14px;
+    }
+
+    .col-tkc::before {
+        content: "Số dư: ";
+        color: var(--text-muted);
+        font-size: 12px;
+        font-weight: 400;
+        margin-right: 4px;
+    }
+
+    .col-otp {
+        width: 100%;
+        padding: 8px 14px;
+        font-size: 20px;
+    }
+
+    .col-otp::before {
+        content: "OTP: ";
+        color: var(--text-muted);
+        font-size: 12px;
+        font-weight: 400;
+        margin-right: 4px;
+    }
+
+    .otp-badge {
+        font-size: 20px;
+        padding: 6px 16px;
+    }
+
+    .col-time {
+        width: 100%;
+        padding: 2px 14px;
+        font-size: 13px;
+    }
+
+    .col-time::before {
+        content: "Thời gian: ";
+        color: var(--text-muted);
+        font-size: 12px;
+        margin-right: 4px;
+    }
+
+    /* Card action zone */
     .col-actions {
         width: 100%;
-        justify-content: flex-start;
-        margin-top: 12px;
-        border-top: 1px solid rgba(255, 255, 255, 0.05);
-        padding-top: 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        padding: 12px 14px;
+        margin-top: 0;
+        border-top: 1px solid rgba(255, 255, 255, 0.06);
+        background: rgba(0, 0, 0, 0.15);
+    }
+
+    .col-actions .btn {
+        width: 100%;
+        justify-content: center;
+        padding: 10px 16px;
+        font-size: 14px;
+        border-radius: 8px;
+    }
+
+    /* === MODAL (Bottom Sheet style) === */
+    .modal-overlay {
+        align-items: flex-end;
+        padding: 0;
     }
 
     .modal {
-        width: 90%;
-        margin: 20px;
+        width: 100%;
+        max-width: 100%;
+        margin: 0;
+        border-radius: 16px 16px 0 0;
+        max-height: 90vh;
+        overflow-y: auto;
     }
 
+    .modal-overlay.active .modal {
+        transform: scale(1) translateY(0);
+    }
+
+    .modal-header {
+        padding: 16px 20px;
+        position: sticky;
+        top: 0;
+        background: #1e1e2d;
+        z-index: 1;
+    }
+
+    .modal-body {
+        padding: 16px 20px;
+    }
+
+    .modal-footer {
+        padding: 12px 20px;
+        position: sticky;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.2);
+    }
+
+    .modal-footer .btn {
+        padding: 10px 20px;
+        font-size: 14px;
+    }
+
+    /* === TOAST === */
     .toast-container {
-        bottom: 16px;
-        right: 16px;
-        left: 16px;
+        bottom: 12px;
+        right: 12px;
+        left: 12px;
     }
     
     .toast {
         width: 100%;
         box-sizing: border-box;
+        font-size: 13px;
+        padding: 12px 16px;
+    }
+
+    /* === HISTORY VIEW === */
+    #history-view h2 {
+        font-size: 18px;
+    }
+
+    #history-view > div:first-child {
+        flex-direction: column;
+        gap: 12px;
+    }
+
+    #history-view .btn-success {
+        width: 100%;
+        justify-content: center;
+    }
+}
+
+/* Small phones */
+@media (max-width: 380px) {
+    .logo span {
+        display: none;
+    }
+
+    .nav-item {
+        padding: 6px 10px;
+        font-size: 12px;
+    }
+
+    .actions {
+        grid-template-columns: 1fr !important;
+    }
+
+    .col-phone {
+        font-size: 16px !important;
+    }
+
+    .col-otp {
+        font-size: 18px !important;
     }
 }

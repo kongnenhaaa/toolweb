@@ -545,9 +545,8 @@ function restoreFromHistory(portId, usedTime) {
 
 // Simulation helpers
 function manualRefresh() {
-    fetchPorts().then(() => {
-        showToast('Đã cập nhật dữ liệu mới nhất!');
-    });
+    renderPorts();
+    showToast('Đã cập nhật dữ liệu mới nhất!');
 }
 
 function simulateOtpArrival(portId, isZalo = false) {
