@@ -280,7 +280,7 @@ function renderHistory() {
             <div class="col-otp"><span style="color: var(--success); font-weight: bold;">${item.otp}</span></div>
             <div class="col-time">${item.usedTime}</div>
             <div class="col-actions">
-                <button class="btn btn-primary" onclick="restoreFromHistory('${item.id}', '${item.usedTime}')" title="Khôi phục trạng thái hoạt động">
+                <button class="btn btn-primary" onclick="restoreFromHistory('${item.id}', '${item.usedTime}', '${item.fbKey}')" title="Khôi phục trạng thái hoạt động">
                     <i data-lucide="rotate-ccw"></i> Khôi phục
                 </button>
             </div>
@@ -524,14 +524,12 @@ function markAsUsed(portId) {
         if(row) {
             row.classList.add('row-exit');
             
-            // Add to history (vẫn lưu ở trình duyệt cá nhân để tuỳ chỉnh báo cáo)
-            state.history.push({
+            // Add to history trên Firebase
+            db.ref('history').push({
                 ...port,
-                usedTime: new Date().toLocaleTimeString('vi-VN')
+                usedTime: new Date().toLocaleTimeString('vi-VN'),
+                timestamp: firebase.database.ServerValue.TIMESTAMP
             });
-
-            // Save to localStorage
-            localStorage.setItem('gsm_history', JSON.stringify(state.history));
             
             // Đồng bộ trạng thái ẨN cho mọi người
             db.ref(`web_states/ports/${portId}`).update({
@@ -547,7 +545,7 @@ function markAsUsed(portId) {
 }
 
 // Restore from History
-function restoreFromHistory(portId, usedTime) {
+function restoreFromHistory(portId, usedTime, fbKey) {
     // Xoá trạng thái ẩn trên Firebase cho tất cả mọi người
     db.ref(`web_states/ports/${portId}`).remove();
     
@@ -558,12 +556,17 @@ function restoreFromHistory(portId, usedTime) {
         port.smsSent = false;
     }
     
-    // Xóa entry khỏi lịch sử
-    const indexToRemove = state.history.findIndex(h => h.id === portId && h.usedTime === usedTime);
-    if (indexToRemove > -1) {
-        state.history.splice(indexToRemove, 1);
-        localStorage.setItem('gsm_history', JSON.stringify(state.history));
-        renderHistory();
+    // Xóa entry khỏi lịch sử trên Firebase
+    if (fbKey && fbKey !== 'undefined') {
+        db.ref(`history/${fbKey}`).remove();
+    } else {
+        // Fallback cho dữ liệu cũ từ localStorage chưa có fbKey
+        const indexToRemove = state.history.findIndex(h => h.id === portId && h.usedTime === usedTime);
+        if (indexToRemove > -1) {
+            state.history.splice(indexToRemove, 1);
+            localStorage.setItem('gsm_history', JSON.stringify(state.history));
+            renderHistory();
+        }
     }
     
     showToast(`Đã khôi phục cổng ${portId} về trạng thái đang hoạt động.`);
@@ -660,13 +663,18 @@ document.getElementById('nav-history').addEventListener('click', (e) => {
 
 // Init
 window.onload = () => {
-    // Load history from localStorage
-    try {
-        const savedHistory = localStorage.getItem('gsm_history');
-        if (savedHistory) {
-            state.history = JSON.parse(savedHistory);
+    // Load history từ Firebase (lấy 200 bản ghi gần nhất để tránh lag)
+    db.ref('history').orderByChild('timestamp').limitToLast(200).on('value', (snapshot) => {
+        const data = snapshot.val();
+        if (data) {
+            state.history = Object.entries(data).map(([key, value]) => ({...value, fbKey: key}));
+        } else {
+            state.history = [];
         }
-    } catch(e) {}
+        if (document.getElementById('history-view').style.display === 'flex') {
+            renderHistory();
+        }
+    });
 
     fetchPorts();
     
