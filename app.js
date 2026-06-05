@@ -215,14 +215,6 @@ function renderPorts() {
             </button>
         `;
 
-        if (port.smsSent && !port.otp) {
-            actionButtons += `
-            <button class="btn btn-outline" onclick="cancelSmsWait('${port.id}')" title="Huỷ trạng thái chờ mã" style="padding: 0 8px;">
-                <i data-lucide="x-circle"></i>
-            </button>
-            `;
-        }
-
         if (port.otp) {
             otpContent = `<span class="otp-badge">${port.otp}</span>`;
             actionButtons = `
@@ -231,6 +223,13 @@ function renderPorts() {
                 </button>
             `;
         }
+
+        // Luôn hiển thị button huỷ chờ
+        actionButtons += `
+            <button class="btn btn-outline" onclick="cancelSmsWait('${port.id}')" title="Huỷ trạng thái" style="padding: 0 8px;">
+                <i data-lucide="x-circle"></i>
+            </button>
+        `;
 
         row.innerHTML = `
             <div class="col-status">${statusDot}</div>
@@ -524,7 +523,33 @@ window.checkBalance = async function(portId) {
 
 window.cancelSmsWait = function(portId) {
     db.ref(`web_states/ports/${portId}`).remove();
-    showToast(`Đã huỷ trạng thái chờ mã cho cổng ${portId}`);
+    
+    // Xoá OTP trên giao diện nếu đang có
+    const port = state.ports.find(p => p.id === portId);
+    if (port && port.otp) {
+        port.otp = null;
+        renderPorts();
+    }
+    
+    showToast(`Đã huỷ trạng thái cho cổng ${portId}`);
+}
+
+window.cancelAllSmsWait = function() {
+    const visiblePorts = state.ports.filter(p => !p.hidden && !p.isTest && p.status === 'online');
+    if (visiblePorts.length === 0) {
+        showToast('Không có cổng nào đang hoạt động!', 'error');
+        return;
+    }
+
+    showToast(`Đang huỷ trạng thái chờ cho ${visiblePorts.length} cổng...`);
+    visiblePorts.forEach(port => {
+        db.ref(`web_states/ports/${port.id}`).remove();
+        if (port.otp) {
+            port.otp = null;
+        }
+    });
+    renderPorts();
+    showToast(`Đã huỷ trạng thái cho ${visiblePorts.length} cổng`);
 }
 
 window.checkAllBalance = async function() {
