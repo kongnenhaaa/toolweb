@@ -279,6 +279,15 @@ h1 {
     background: rgba(255, 255, 255, 0.03);
 }
 
+.grid-row.row-highlight-red {
+    background: rgba(239, 68, 68, 0.15);
+    border-left: 2px solid var(--danger);
+}
+
+.grid-row.row-highlight-red:hover {
+    background: rgba(239, 68, 68, 0.25);
+}
+
 /* Columns */
 .col-status { width: 60px; }
 .col-port { width: 120px; font-weight: 500; }

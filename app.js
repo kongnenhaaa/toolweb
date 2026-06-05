@@ -5,6 +5,8 @@ const state = {
     currentActionPortId: null
 };
 
+let lastSyncTime = 0;
+
 // Firebase configuration
 const firebaseConfig = {
     databaseURL: "https://toolweb-c7702-default-rtdb.firebaseio.com/"
@@ -76,6 +78,9 @@ function renderPorts() {
     visiblePorts.forEach(port => {
         const row = document.createElement('div');
         row.className = 'grid-row';
+        if (port.smsSent) {
+            row.classList.add('row-highlight-red');
+        }
         row.id = `row-${port.id}`;
 
         const statusDot = port.status === 'online' ? 
@@ -115,6 +120,9 @@ function renderPorts() {
     });
 
     lucide.createIcons();
+    if (typeof checkConnectionStatus === 'function') {
+        checkConnectionStatus();
+    }
 }
 
 // Render History
@@ -423,4 +431,34 @@ window.onload = () => {
             }
         }
     });
+
+    db.ref('server_status').on('value', (snapshot) => {
+        const data = snapshot.val();
+        if (data && data.lastSync) {
+            lastSyncTime = data.lastSync;
+            checkConnectionStatus();
+        }
+    });
+
+    setInterval(checkConnectionStatus, 2000);
 };
+
+function checkConnectionStatus() {
+    const indicator = document.querySelector('.system-status .status-indicator');
+    const textSpan = document.querySelector('.system-status span');
+    if (!indicator || !textSpan) return;
+
+    const visibleCount = state.ports.filter(p => !p.hidden && !p.isTest).length;
+    const now = Date.now();
+    
+    // Check if we haven't received a heartbeat in 6 seconds
+    if (lastSyncTime === 0 || now - lastSyncTime > 6000) {
+        indicator.className = 'status-indicator';
+        indicator.style.background = 'red';
+        textSpan.textContent = `Hệ thống mất kết nối (${visibleCount} Cổng)`;
+    } else {
+        indicator.className = 'status-indicator online';
+        indicator.style.background = '';
+        textSpan.textContent = `Hệ thống trực tuyến (${visibleCount} Cổng)`;
+    }
+}
