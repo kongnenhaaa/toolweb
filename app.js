@@ -7,6 +7,38 @@ const state = {
 
 let lastSyncTime = 0;
 let globalWebStates = {};
+let pendingBalanceChecks = new Set();
+
+// Âm thanh thông báo OTP (Web Audio API - không cần file ngoài)
+function playNotificationSound() {
+    try {
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        
+        // Beep 1
+        const osc1 = ctx.createOscillator();
+        const gain1 = ctx.createGain();
+        osc1.connect(gain1);
+        gain1.connect(ctx.destination);
+        osc1.frequency.value = 880;
+        osc1.type = 'sine';
+        gain1.gain.setValueAtTime(0.3, ctx.currentTime);
+        gain1.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.15);
+        osc1.start(ctx.currentTime);
+        osc1.stop(ctx.currentTime + 0.15);
+        
+        // Beep 2 (cao hơn, sau 0.18s)
+        const osc2 = ctx.createOscillator();
+        const gain2 = ctx.createGain();
+        osc2.connect(gain2);
+        gain2.connect(ctx.destination);
+        osc2.frequency.value = 1100;
+        osc2.type = 'sine';
+        gain2.gain.setValueAtTime(0.3, ctx.currentTime + 0.18);
+        gain2.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.4);
+        osc2.start(ctx.currentTime + 0.18);
+        osc2.stop(ctx.currentTime + 0.4);
+    } catch (e) {}
+}
 
 // Firebase configuration
 const firebaseConfig = {
@@ -138,12 +170,13 @@ function renderPorts() {
         let otpContent = port.smsSent ? 
             '<span style="color: #f39c12">Đang chờ mã...</span>' : 
             '<span style="color: var(--text-muted)">Chưa gửi tin nhắn</span>';
+        const isChecking = pendingBalanceChecks.has(port.id);
         let actionButtons = `
             <button class="btn btn-primary" onclick="openSmsModal('${port.id}')" title="Gửi SMS Lấy OTP">
                 <i data-lucide="send"></i> Gửi SMS
             </button>
-            <button class="btn btn-outline" onclick="checkBalance('${port.id}')" title="Kiểm tra số dư">
-                <i data-lucide="dollar-sign"></i> Kiểm tra số dư
+            <button class="btn btn-outline${isChecking ? ' btn-loading' : ''}" id="btn-balance-${port.id}" onclick="checkBalance('${port.id}')" title="Kiểm tra số dư" ${isChecking ? 'disabled' : ''}>
+                ${isChecking ? '<span class="spinner"></span> Đang kiểm tra...' : '<i data-lucide="dollar-sign"></i> Kiểm tra số dư'}
             </button>
         `;
 
@@ -412,7 +445,12 @@ window.checkBalance = async function(portId) {
         return;
     }
 
+    if (pendingBalanceChecks.has(portId)) return; // Đang kiểm tra rồi
+
     try {
+        pendingBalanceChecks.add(portId);
+        renderPorts();
+
         const commandRef = db.ref('commands').push();
         await commandRef.set({
             portId: portId,
@@ -421,8 +459,31 @@ window.checkBalance = async function(portId) {
             timestamp: firebase.database.ServerValue.TIMESTAMP
         });
         showToast(`Đã gửi lệnh kiểm tra số dư cho cổng ${portId}`);
+
+        // Tự tắt spinner sau 15s nếu không nhận được kết quả
+        setTimeout(() => {
+            if (pendingBalanceChecks.has(portId)) {
+                pendingBalanceChecks.delete(portId);
+                renderPorts();
+            }
+        }, 15000);
     } catch (error) {
+        pendingBalanceChecks.delete(portId);
+        renderPorts();
         showToast('Không thể đẩy lệnh lên Firebase!', 'error');
+    }
+}
+
+window.checkAllBalance = async function() {
+    const visiblePorts = state.ports.filter(p => !p.hidden && !p.isTest && p.status === 'online');
+    if (visiblePorts.length === 0) {
+        showToast('Không có cổng nào đang hoạt động!', 'error');
+        return;
+    }
+
+    showToast(`Đang gửi lệnh kiểm tra TKC cho ${visiblePorts.length} cổng...`);
+    for (const port of visiblePorts) {
+        await checkBalance(port.id);
     }
 }
 
@@ -588,7 +649,13 @@ window.onload = () => {
             const existingPort = state.ports.find(p => p.id === port.id);
             if (!existingPort || existingPort.otp !== port.otp) {
                 showToast(`Có mã OTP mới ở cổng ${port.id}!`);
+                playNotificationSound();
             }
+        }
+        // Tắt spinner kiểm tra TKC khi balance thay đổi
+        if (port && port.id && pendingBalanceChecks.has(port.id)) {
+            pendingBalanceChecks.delete(port.id);
+            // renderPorts sẽ được gọi bởi fetchPorts listener
         }
     });
 
