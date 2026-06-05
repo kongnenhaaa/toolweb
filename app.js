@@ -6,6 +6,7 @@ const state = {
 };
 
 let lastSyncTime = 0;
+let globalWebStates = {};
 
 // Firebase configuration
 const firebaseConfig = {
@@ -22,61 +23,11 @@ function fetchPorts() {
             // Convert to array and filter out nulls/undefined if any
             const portsArray = Object.values(data).filter(p => p);
             
-            const hiddenPorts = JSON.parse(localStorage.getItem('gsm_hidden_ports') || '{}');
-
-            // Merge hidden history state and smsSent status
-            portsArray.forEach(serverPort => {
-                const existingPort = state.ports.find(p => p.id === serverPort.id);
-                
-                // Tự động phát hiện thay SIM (số điện thoại thay đổi và có số mới hợp lệ)
-                const isNewSim = existingPort && 
-                               existingPort.phone && 
-                               serverPort.phone && 
-                               existingPort.phone !== serverPort.phone && 
-                               serverPort.phone !== 'N/A' && 
-                               serverPort.phone !== 'Unknown';
-
-                // Nếu có SIM mới được cắm vào, xóa trạng thái ẩn để nó hiện lên lại
-                if (isNewSim) {
-                    if (hiddenPorts[serverPort.id]) {
-                        delete hiddenPorts[serverPort.id];
-                        localStorage.setItem('gsm_hidden_ports', JSON.stringify(hiddenPorts));
-                    }
-                    serverPort.hidden = false;
-                    serverPort.smsSent = false;
-                } else if (hiddenPorts[serverPort.id]) {
-                    // Cùng một SIM, kiểm tra xem có OTP mới không
-                    if (serverPort.otp && serverPort.otp !== hiddenPorts[serverPort.id]) {
-                        serverPort.hidden = false;
-                        serverPort.smsSent = false;
-                        delete hiddenPorts[serverPort.id];
-                        localStorage.setItem('gsm_hidden_ports', JSON.stringify(hiddenPorts));
-                    } else {
-                        serverPort.hidden = true;
-                    }
-                }
-
-                if (existingPort && !isNewSim) {
-                    if (existingPort.hidden && !hiddenPorts[serverPort.id]) {
-                        // Tự động hiện lại cổng nếu C# báo OTP mới hoặc OTP bị reset
-                        if (serverPort.otp !== existingPort.otp) {
-                            serverPort.hidden = false;
-                            serverPort.smsSent = false; // Reset trạng thái gửi SMS
-                        } else {
-                            serverPort.hidden = true;
-                        }
-                    }
-                    if (existingPort.smsSent && !serverPort.hidden) {
-                        serverPort.smsSent = true;
-                    }
-                }
-            });
-            
             // Retain locally created test ports
             const testPorts = state.ports.filter(p => p.isTest);
             state.ports = [...portsArray, ...testPorts];
             
-            renderPorts();
+            applyWebStates();
         } else {
             // Không có dữ liệu
             state.ports = state.ports.filter(p => p.isTest);
@@ -85,6 +36,48 @@ function fetchPorts() {
     }, (error) => {
         console.error('Lỗi khi tải dữ liệu từ Firebase:', error);
     });
+
+    // Lắng nghe trạng thái dùng chung (ẩn cổng, đã gửi sms)
+    db.ref('web_states/ports').on('value', (snapshot) => {
+        globalWebStates = snapshot.val() || {};
+        applyWebStates();
+    });
+}
+
+function applyWebStates() {
+    if (state.ports.length === 0) return;
+
+    state.ports.forEach(port => {
+        if (port.isTest) return; // Bỏ qua cổng test
+
+        const webState = globalWebStates[port.id] || {};
+        
+        let shouldHide = false;
+        let isSmsSent = webState.smsSent || false;
+
+        if (webState.hiddenOtp) {
+            // Đã bị ẩn bởi một người dùng nào đó
+            // Ktra xem C# có cập nhật SĐT mới không (thay SIM)?
+            if (port.phone && webState.phone && port.phone !== webState.phone && port.phone !== 'N/A' && port.phone !== 'Unknown') {
+                db.ref(`web_states/ports/${port.id}`).remove();
+                shouldHide = false;
+                isSmsSent = false;
+            } 
+            // Ktra xem C# có cập nhật OTP mới không?
+            else if (port.otp && port.otp !== webState.hiddenOtp) {
+                db.ref(`web_states/ports/${port.id}`).remove();
+                shouldHide = false;
+                isSmsSent = false;
+            } else {
+                shouldHide = true;
+            }
+        }
+
+        port.hidden = shouldHide;
+        port.smsSent = isSmsSent;
+    });
+
+    renderPorts();
 }
 
 // Render Ports
@@ -375,19 +368,34 @@ async function executeSendSms() {
     }
     
     try {
-        // Đẩy lệnh lên Firebase để phần mềm C# nhận
-        const commandRef = db.ref('commands').push();
-        await commandRef.set({
-            portId: actionPortId,
-            recipient: recipient,
-            content: content,
-            timestamp: firebase.database.ServerValue.TIMESTAMP
-        });
+        const recipients = recipient.split(',').map(r => r.trim()).filter(r => r);
+        
+        for (const rec of recipients) {
+            // Đẩy lệnh lên Firebase để phần mềm C# nhận
+            const commandRef = db.ref('commands').push();
+            await commandRef.set({
+                portId: actionPortId,
+                recipient: rec,
+                content: content,
+                timestamp: firebase.database.ServerValue.TIMESTAMP
+            });
+        }
         
         const port = state.ports.find(p => p.id === actionPortId);
-        if (port) port.smsSent = true;
-        renderPorts();
-        showToast(`Đã gửi lệnh SMS từ ${actionPortId} đến ${recipient}`);
+        if (port && !port.isTest) {
+            db.ref(`web_states/ports/${actionPortId}`).update({
+                smsSent: true
+            });
+        } else if (port) {
+            port.smsSent = true;
+            renderPorts();
+        }
+        
+        if (recipients.length > 1) {
+            showToast(`Đã gửi ${recipients.length} lệnh SMS từ ${actionPortId}`);
+        } else {
+            showToast(`Đã gửi lệnh SMS từ ${actionPortId} đến ${recipients[0]}`);
+        }
     } catch (error) {
         showToast('Không thể đẩy lệnh lên Firebase!', 'error');
     }
@@ -406,7 +414,7 @@ function markAsUsed(portId) {
         if(row) {
             row.classList.add('row-exit');
             
-            // Add to history
+            // Add to history (vẫn lưu ở trình duyệt cá nhân để tuỳ chỉnh báo cáo)
             state.history.push({
                 ...port,
                 usedTime: new Date().toLocaleTimeString('vi-VN')
@@ -415,14 +423,13 @@ function markAsUsed(portId) {
             // Save to localStorage
             localStorage.setItem('gsm_history', JSON.stringify(state.history));
             
-            // Save hidden port state
-            const hiddenPorts = JSON.parse(localStorage.getItem('gsm_hidden_ports') || '{}');
-            hiddenPorts[portId] = port.otp || true;
-            localStorage.setItem('gsm_hidden_ports', JSON.stringify(hiddenPorts));
+            // Đồng bộ trạng thái ẨN cho mọi người
+            db.ref(`web_states/ports/${portId}`).update({
+                hiddenOtp: port.otp || 'NONE',
+                phone: port.phone || 'NONE'
+            });
 
             setTimeout(() => {
-                port.hidden = true; // hide from main view
-                renderPorts();
                 showToast(`Đã lưu SĐT ${port.phone} vào lịch sử.`);
             }, 400); // wait for animation
         }
@@ -431,12 +438,8 @@ function markAsUsed(portId) {
 
 // Restore from History
 function restoreFromHistory(portId, usedTime) {
-    // Xóa trạng thái ẩn của cổng
-    const hiddenPorts = JSON.parse(localStorage.getItem('gsm_hidden_ports') || '{}');
-    if (hiddenPorts[portId]) {
-        delete hiddenPorts[portId];
-        localStorage.setItem('gsm_hidden_ports', JSON.stringify(hiddenPorts));
-    }
+    // Xoá trạng thái ẩn trên Firebase cho tất cả mọi người
+    db.ref(`web_states/ports/${portId}`).remove();
     
     // Cập nhật state local
     const port = state.ports.find(p => p.id === portId);
@@ -453,7 +456,6 @@ function restoreFromHistory(portId, usedTime) {
         renderHistory();
     }
     
-    renderPorts();
     showToast(`Đã khôi phục cổng ${portId} về trạng thái đang hoạt động.`);
 }
 

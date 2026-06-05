@@ -37,7 +37,8 @@ body {
 
 .app-container {
     display: flex;
-    height: 100vh;
+    height: 100dvh; /* Dùng dvh thay vì vh để tương thích thanh địa chỉ mobile */
+    overflow: hidden;
 }
 
 /* Sidebar */
@@ -98,7 +99,7 @@ body {
 }
 
 .system-status {
-    padding: 24px;
+    padding: 16px 24px;
     display: flex;
     align-items: center;
     gap: 10px;
@@ -131,7 +132,7 @@ body {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 24px 32px;
+    padding: 20px 32px;
 }
 
 h1 {
@@ -227,10 +228,17 @@ h1 {
 .content-area {
     flex: 1;
     padding: 0 32px 32px 32px;
-    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden; /* Cấm cuộn ở đây để tránh double scroll */
+    min-height: 0; /* Cho phép flexbox co ngót mượt mà */
 }
 
 .grid-container {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
     background: var(--bg-panel);
     border: 1px solid var(--border-color);
     border-radius: 12px;
@@ -241,18 +249,19 @@ h1 {
 .grid-header {
     display: flex;
     padding: 16px 24px;
-    background: rgba(0, 0, 0, 0.2);
+    background: rgba(0, 0, 0, 0.4); /* Đậm hơn xíu để tách biệt header */
     border-bottom: 1px solid var(--border-color);
     font-weight: 600;
     font-size: 13px;
     color: var(--text-muted);
     text-transform: uppercase;
     letter-spacing: 0.5px;
+    z-index: 2;
 }
 
 .grid-body {
-    max-height: calc(100vh - 200px);
-    overflow-y: auto;
+    flex: 1;
+    overflow-y: auto; /* Chỉ cho phép cuộn bên trong danh sách SIM */
 }
 
 /* Scrollbar */
@@ -559,10 +568,29 @@ h1 {
 
     .content-area {
         padding: 0 16px 16px 16px;
+        flex: 1;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+    }
+
+    .grid-container {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+        background: transparent;
+        border: none;
     }
 
     .grid-header {
         display: none;
+    }
+
+    .grid-body {
+        flex: 1;
+        overflow-y: auto;
+        padding-bottom: 20px;
     }
 
     .grid-row {
@@ -574,7 +602,7 @@ h1 {
         border: 1px solid var(--border-color);
         border-radius: 8px;
         margin-bottom: 12px;
-        background: rgba(255, 255, 255, 0.02);
+        background: rgba(255, 255, 255, 0.03);
     }
 
     .col-status {
