@@ -92,21 +92,45 @@ function renderPorts() {
     const container = document.getElementById('ports-container');
     container.innerHTML = '';
 
-    const visiblePorts = state.ports.filter(p => !p.hidden);
-
-    if (visiblePorts.length === 0) {
-        container.innerHTML = `<div style="padding: 40px; text-align: center; color: var(--text-muted);">Tất cả các số đã được sử dụng.</div>`;
-        return;
-    }
-
-    // Sort ports by COM number (e.g. COM1, COM2, COM10)
-    visiblePorts.sort((a, b) => {
+    // Sort ALL ports by COM number to guarantee stable order for division
+    const allPorts = [...state.ports].sort((a, b) => {
         const numA = parseInt(a.id.replace(/\D/g, '')) || 0;
         const numB = parseInt(b.id.replace(/\D/g, '')) || 0;
         return numA - numB;
     });
 
-    visiblePorts.forEach(port => {
+    // --- APPLY SPLIT LOGIC ---
+    const workersStr = document.getElementById('split-workers')?.value;
+    const partStr = document.getElementById('split-part')?.value;
+    const workers = parseInt(workersStr) || 1;
+    const part = parseInt(partStr) || 1;
+
+    let myAssignedPorts = allPorts;
+    
+    if (workers > 1) {
+        // Divide total hardware ports
+        const totalPorts = allPorts.length;
+        const portsPerPerson = Math.floor(totalPorts / workers);
+        const remainder = totalPorts % workers;
+        
+        let startIndex = 0;
+        for (let i = 1; i < part; i++) {
+            startIndex += portsPerPerson + (i <= remainder ? 1 : 0);
+        }
+        const count = portsPerPerson + (part <= remainder ? 1 : 0);
+        
+        myAssignedPorts = allPorts.slice(startIndex, startIndex + count);
+    }
+
+    // After assigning the stable chunk, filter out the hidden ones
+    const portsToRender = myAssignedPorts.filter(p => !p.hidden);
+
+    if (portsToRender.length === 0) {
+        container.innerHTML = `<div style="padding: 40px; text-align: center; color: var(--text-muted);">Không có cổng nào (hoặc đã dùng hết) trong phần này.</div>`;
+        return;
+    }
+
+    portsToRender.forEach(port => {
         const row = document.createElement('div');
         row.className = 'grid-row';
         if (port.smsSent) {
@@ -153,6 +177,35 @@ function renderPorts() {
     lucide.createIcons();
     if (typeof checkConnectionStatus === 'function') {
         checkConnectionStatus();
+    }
+}
+
+function updateSplitSelect() {
+    const workersInput = document.getElementById('split-workers');
+    if (!workersInput) return;
+    let workers = parseInt(workersInput.value);
+    if (isNaN(workers) || workers < 1) {
+        workers = 1;
+        workersInput.value = 1;
+    }
+    
+    const partSelect = document.getElementById('split-part');
+    if (!partSelect) return;
+    const currentPart = parseInt(partSelect.value) || 1;
+    
+    partSelect.innerHTML = '';
+    for (let i = 1; i <= workers; i++) {
+        const option = document.createElement('option');
+        option.value = i;
+        option.textContent = `Phần ${i}`;
+        if (i === currentPart) {
+            option.selected = true;
+        }
+        partSelect.appendChild(option);
+    }
+    
+    if (currentPart > workers) {
+        partSelect.value = "1";
     }
 }
 
