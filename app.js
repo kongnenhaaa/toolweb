@@ -286,7 +286,21 @@ function renderHistory() {
         return;
     }
 
-    state.history.sort((a, b) => new Date(b.usedTime) - new Date(a.usedTime)).forEach(item => {
+    // Deduplicate history to prevent showing duplicates caused by multiple clients triggering 10s timeout
+    const uniqueHistory = [];
+    const seen = new Set();
+    
+    const sortedHistory = [...state.history].sort((a, b) => new Date(b.usedTime) - new Date(a.usedTime));
+    
+    sortedHistory.forEach(item => {
+        const uniqueKey = `${item.id}-${item.phone}-${item.otp}`;
+        if (!seen.has(uniqueKey)) {
+            seen.add(uniqueKey);
+            uniqueHistory.push(item);
+        }
+    });
+
+    uniqueHistory.forEach(item => {
         const row = document.createElement('div');
         row.className = 'grid-row';
 
@@ -571,6 +585,10 @@ function markAsUsed(portId) {
     if (portIndex > -1) {
         const port = state.ports[portIndex];
         
+        // Ngăn chặn bấm nhiều lần liên tiếp (double click spam)
+        if (port.isMarking) return;
+        port.isMarking = true;
+        
         // Add exit animation class
         const row = document.getElementById(`row-${portId}`);
         if(row) {
@@ -596,7 +614,6 @@ function markAsUsed(portId) {
     }
 }
 
-// Restore from History
 function restoreFromHistory(portId, usedTime, fbKey) {
     // Xoá trạng thái ẩn trên Firebase cho tất cả mọi người
     db.ref(`web_states/ports/${portId}`).remove();
@@ -606,6 +623,7 @@ function restoreFromHistory(portId, usedTime, fbKey) {
     if (port) {
         port.hidden = false;
         port.smsSent = false;
+        port.isMarking = false; // Reset cờ trạng thái
     }
     
     // Xóa entry khỏi lịch sử trên Firebase
