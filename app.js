@@ -326,7 +326,7 @@ function renderHistory() {
             </div>
         `;
 
-        container.appendChild(row);
+        container.prepend(row);
     });
 
     lucide.createIcons();
