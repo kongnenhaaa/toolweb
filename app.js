@@ -11,8 +11,18 @@ let pendingBalanceChecks = new Set();
 let autoHistoryTimeouts = {};
 
 function scheduleAutoHistory(portId) {
-    // Đã bỏ tính năng 10s tự chuyển qua lịch sử.
-    // Giờ chỉ chuyển khi người dùng bấm "Đã dùng".
+    if (autoHistoryTimeouts[portId]) {
+        clearTimeout(autoHistoryTimeouts[portId]);
+    }
+    
+    // Tự động chuyển qua lịch sử sau 20 giây
+    autoHistoryTimeouts[portId] = setTimeout(() => {
+        const port = state.ports.find(p => p.id === portId);
+        // Chỉ tự động chuyển nếu cổng chưa bị ẩn (tránh bị push trùng từ nhiều máy khách cùng lúc)
+        if (port && !port.hidden) {
+            markAsUsed(portId);
+        }
+    }, 20000);
 }
 
 // Âm thanh thông báo OTP (Web Audio API - không cần file ngoài)
