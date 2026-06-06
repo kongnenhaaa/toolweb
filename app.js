@@ -410,9 +410,16 @@ function openSmsModal(portId) {
     document.getElementById('sms-port-name').textContent = port.id;
     document.getElementById('sms-phone-number').textContent = port.phone;
     
-    document.getElementById('sms-recipient-select').value = '8500';
-    document.getElementById('sms-recipient-custom').value = '';
-    document.getElementById('sms-recipient-custom').style.display = 'none';
+    // Không reset lại đầu số về 8500 nữa, để UI nhớ lựa chọn cuối cùng của người dùng (ví dụ họ đang gửi hàng loạt cho 7539)
+    // document.getElementById('sms-recipient-select').value = '8500';
+    
+    // Nếu họ đang ở chế độ custom thì giữ nguyên, ngược lại thì ẩn
+    const select = document.getElementById('sms-recipient-select');
+    const customInput = document.getElementById('sms-recipient-custom');
+    if (select.value !== 'custom') {
+        customInput.value = '';
+        customInput.style.display = 'none';
+    }
     
     document.getElementById('sms-content').value = 'ZALO'; // Default content
     
