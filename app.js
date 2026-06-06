@@ -117,6 +117,7 @@ function applyWebStates() {
         
         let shouldHide = false;
         let isSmsSent = webState.smsSent || false;
+        let errorMsg = webState.errorMsg || null;
 
         if (webState.hiddenOtp) {
             // Đã bị ẩn bởi một người dùng nào đó
@@ -125,12 +126,14 @@ function applyWebStates() {
                 db.ref(`web_states/ports/${port.id}`).remove();
                 shouldHide = false;
                 isSmsSent = false;
+                errorMsg = null;
             } 
             // Ktra xem C# có cập nhật OTP mới không?
             else if (port.otp && port.otp !== webState.hiddenOtp) {
                 db.ref(`web_states/ports/${port.id}`).remove();
                 shouldHide = false;
                 isSmsSent = false;
+                errorMsg = null;
             } else {
                 shouldHide = true;
             }
@@ -140,11 +143,13 @@ function applyWebStates() {
             if (port.phone && webState.phone && port.phone !== webState.phone && port.phone !== 'N/A' && port.phone !== 'Unknown') {
                 db.ref(`web_states/ports/${port.id}`).remove();
                 isSmsSent = false;
+                errorMsg = null;
             }
         }
 
         port.hidden = shouldHide;
         port.smsSent = isSmsSent;
+        port.errorMsg = errorMsg;
     });
 
     renderPorts();
@@ -208,6 +213,7 @@ function renderPorts() {
         let otpContent = port.smsSent ? 
             '<span style="color: #f39c12">Đang chờ mã...</span>' : 
             '<span style="color: var(--text-muted)">Chưa gửi tin nhắn</span>';
+
         const isChecking = pendingBalanceChecks.has(port.id);
         let actionButtons = `
             <button class="btn btn-primary" onclick="openSmsModal('${port.id}')" title="Gửi SMS Lấy OTP">
@@ -218,7 +224,9 @@ function renderPorts() {
             </button>
         `;
 
-        if (port.otp) {
+        if (port.errorMsg) {
+            otpContent = `<span style="color: var(--danger); font-weight: 500;"><i data-lucide="alert-triangle" style="width: 14px; height: 14px; display: inline; margin-bottom: -2px;"></i> ${port.errorMsg}</span>`;
+        } else if (port.otp) {
             otpContent = `<span class="otp-badge">${port.otp}</span>`;
             actionButtons = `
                 <button class="btn btn-success" onclick="markAsUsed('${port.id}')">
@@ -490,9 +498,11 @@ async function executeSendSms() {
         if (port && !port.isTest) {
             // Xoá OTP cũ hiển thị trên trình duyệt để chuyển sang trạng thái "Đang chờ mã..."
             port.otp = null;
+            port.errorMsg = null;
             
             db.ref(`web_states/ports/${actionPortId}`).update({
                 smsSent: true,
+                errorMsg: null,
                 phone: port.phone || 'NONE'
             });
         } else if (port) {
