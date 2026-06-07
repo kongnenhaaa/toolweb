@@ -245,13 +245,6 @@ function renderPorts() {
             `;
         }
 
-        // Thêm nút reset cứng cổng
-        actionButtons += `
-            <button class="btn btn-outline" onclick="refreshHardwarePort('${port.id}')" title="Khởi động lại kết nối thiết bị" style="padding: 0 8px;">
-                <i data-lucide="power"></i>
-            </button>
-        `;
-
         row.innerHTML = `
             <div class="col-status">${statusDot}</div>
             <div class="col-port">${port.id}</div>
@@ -567,25 +560,6 @@ window.checkBalance = async function(portId) {
     }
 }
 
-window.refreshHardwarePort = async function(portId) {
-    if (portId.startsWith('COM_TEST')) {
-        showToast(`[TEST] Đã gửi lệnh làm mới (reset) cổng ${portId}`);
-        return;
-    }
-    try {
-        const commandRef = db.ref('commands').push();
-        await commandRef.set({
-            portId: portId,
-            recipient: 'SYSTEM',
-            content: 'REFRESH_PORT',
-            timestamp: firebase.database.ServerValue.TIMESTAMP
-        });
-        showToast(`Đã yêu cầu khởi động lại cổng ${portId}`);
-    } catch (error) {
-        showToast('Không thể đẩy lệnh lên Firebase!', 'error');
-    }
-}
-
 window.cancelSmsWait = function(portId) {
     db.ref(`web_states/ports/${portId}`).remove();
     db.ref(`ports/${portId}/otp`).remove();
@@ -790,6 +764,26 @@ document.getElementById('nav-history').addEventListener('click', (e) => {
 
 // Init
 window.onload = () => {
+    // Global Note Sync
+    const noteEl = document.getElementById('global-note');
+    if (noteEl) {
+        let isLocalUpdate = false;
+        
+        db.ref('global_note').on('value', (snapshot) => {
+            const val = snapshot.val() || '';
+            if (!isLocalUpdate) {
+                noteEl.value = val;
+            }
+        });
+
+        noteEl.addEventListener('input', (e) => {
+            isLocalUpdate = true;
+            db.ref('global_note').set(e.target.value).then(() => {
+                isLocalUpdate = false;
+            });
+        });
+    }
+
     // Load history từ Firebase (lấy 200 bản ghi gần nhất để tránh lag)
     db.ref('history').orderByChild('timestamp').limitToLast(200).on('value', (snapshot) => {
         const data = snapshot.val();
