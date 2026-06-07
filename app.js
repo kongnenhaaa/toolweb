@@ -500,6 +500,8 @@ async function executeSendSms() {
             port.otp = null;
             port.errorMsg = null;
             
+            db.ref(`ports/${actionPortId}/otp`).remove();
+            
             db.ref(`web_states/ports/${actionPortId}`).update({
                 smsSent: true,
                 errorMsg: null,
@@ -560,6 +562,7 @@ window.checkBalance = async function(portId) {
 
 window.cancelSmsWait = function(portId) {
     db.ref(`web_states/ports/${portId}`).remove();
+    db.ref(`ports/${portId}/otp`).remove();
     
     // Xoá OTP trên giao diện nếu đang có
     const port = state.ports.find(p => p.id === portId);
@@ -582,6 +585,7 @@ window.cancelAllSmsWait = function() {
     showToast(`Đang huỷ trạng thái chờ cho ${visiblePorts.length} cổng...`);
     visiblePorts.forEach(port => {
         db.ref(`web_states/ports/${port.id}`).remove();
+        db.ref(`ports/${port.id}/otp`).remove();
         if (port.otp) port.otp = null;
         port.smsSent = false;
     });
