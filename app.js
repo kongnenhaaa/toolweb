@@ -245,6 +245,13 @@ function renderPorts() {
             `;
         }
 
+        // Thêm nút reset cứng cổng
+        actionButtons += `
+            <button class="btn btn-outline" onclick="refreshHardwarePort('${port.id}')" title="Khởi động lại kết nối thiết bị" style="padding: 0 8px;">
+                <i data-lucide="power"></i>
+            </button>
+        `;
+
         row.innerHTML = `
             <div class="col-status">${statusDot}</div>
             <div class="col-port">${port.id}</div>
@@ -556,6 +563,25 @@ window.checkBalance = async function(portId) {
     } catch (error) {
         pendingBalanceChecks.delete(portId);
         renderPorts();
+        showToast('Không thể đẩy lệnh lên Firebase!', 'error');
+    }
+}
+
+window.refreshHardwarePort = async function(portId) {
+    if (portId.startsWith('COM_TEST')) {
+        showToast(`[TEST] Đã gửi lệnh làm mới (reset) cổng ${portId}`);
+        return;
+    }
+    try {
+        const commandRef = db.ref('commands').push();
+        await commandRef.set({
+            portId: portId,
+            recipient: 'SYSTEM',
+            content: 'REFRESH_PORT',
+            timestamp: firebase.database.ServerValue.TIMESTAMP
+        });
+        showToast(`Đã yêu cầu khởi động lại cổng ${portId}`);
+    } catch (error) {
         showToast('Không thể đẩy lệnh lên Firebase!', 'error');
     }
 }
