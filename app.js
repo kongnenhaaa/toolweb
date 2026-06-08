@@ -432,6 +432,9 @@ function openSmsModal(portId) {
 
     // Không tự động đổi đầu số theo nhà mạng vì Zalo có thể yêu cầu gửi 8500 từ SIM Viettel và ngược lại.
     // UI sẽ giữ nguyên lựa chọn cuối cùng của người dùng.
+    const select = document.getElementById('sms-recipient-select');
+    const customInput = document.getElementById('sms-recipient-custom');
+    
     if (select.value === 'custom') {
         // giữ hiện custom input nếu đang ở mode custom
     } else {
