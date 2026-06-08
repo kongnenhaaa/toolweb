@@ -616,6 +616,17 @@ window.checkAllBalance = async function() {
     }
 }
 
+window.refreshAllPorts = function() {
+    showToast('Đang gửi lệnh làm mới toàn bộ cổng...');
+    const commandRef = db.ref('commands').push();
+    commandRef.set({
+        portId: 'ALL',
+        recipient: 'SYSTEM',
+        content: 'REFRESH_ALL',
+        timestamp: firebase.database.ServerValue.TIMESTAMP
+    });
+}
+
 // Mark as Used
 function markAsUsed(portId) {
     if (autoHistoryTimeouts[portId]) {
