@@ -110,6 +110,11 @@ function fetchPorts() {
                 newPort.otp = existingPort.otp;
             }
 
+            // Giữ lại thời gian bắt đầu đếm ngược để không bị reset khi Firebase cập nhật
+            if (existingPort && existingPort.smsSentTime) {
+                newPort.smsSentTime = existingPort.smsSentTime;
+            }
+
             if (newPort.otp) {
                 if (!existingPort || existingPort.otp !== newPort.otp) {
                     scheduleAutoHistory(newPort.id, newPort.machineId);
