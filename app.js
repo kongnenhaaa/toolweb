@@ -424,8 +424,13 @@ function openSmsModal(portId) {
         const net = (port.network || 'UNKNOWN').toUpperCase();
         let badgeColor = '#888';
         if (net.includes('VIETTEL'))  badgeColor = '#e74c3c';
-        if (net.includes('VINA') || net.includes('VINAPHONE')) badgeColor = '#2980b9';
-        if (net.includes('MOBI'))     badgeColor = '#27ae60';
+        else if (net.includes('VINA') || net.includes('VINAPHONE')) badgeColor = '#2980b9';
+        else if (net.includes('MOBI'))     badgeColor = '#27ae60';
+        else if (net.includes('SKY'))      badgeColor = '#00a8ff';
+        else if (net.includes('LOCAL'))    badgeColor = '#e1b12c';
+        else if (net.includes('WINTEL'))   badgeColor = '#e84393';
+        else if (net.includes('ITELECOM') || net.includes('ITEL')) badgeColor = '#d35400';
+        else if (net.includes('VIETNAMOBILE') || net.includes('VNM')) badgeColor = '#f39c12';
         networkEl.textContent = port.network || 'UNKNOWN';
         networkEl.style.background = badgeColor;
     }
