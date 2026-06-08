@@ -147,6 +147,12 @@ function applyWebStates() {
             }
         }
 
+        if (isSmsSent && !port.smsSentTime) {
+            port.smsSentTime = Date.now();
+        } else if (!isSmsSent) {
+            port.smsSentTime = null;
+        }
+
         port.hidden = shouldHide;
         port.smsSent = isSmsSent;
         port.errorMsg = errorMsg;
@@ -211,7 +217,7 @@ function renderPorts() {
             '<div class="status-indicator" style="background: red;"></div>';
 
         let otpContent = port.smsSent ? 
-            '<span style="color: #f39c12">Đang chờ mã...</span>' : 
+            `<span style="color: #f39c12">Đang chờ mã... <span class="wait-timer" data-port="${port.id}"></span></span>` : 
             '<span style="color: var(--text-muted)">Chưa gửi tin nhắn</span>';
 
         const isChecking = pendingBalanceChecks.has(port.id);
@@ -264,6 +270,23 @@ function renderPorts() {
         checkConnectionStatus();
     }
 }
+
+// Timer cập nhật đếm giây
+setInterval(() => {
+    const timers = document.querySelectorAll('.wait-timer');
+    timers.forEach(el => {
+        const portId = el.getAttribute('data-port');
+        const port = state.ports.find(p => p.id === portId);
+        if (port && port.smsSentTime) {
+            const elapsedSeconds = Math.floor((Date.now() - port.smsSentTime) / 1000);
+            if (elapsedSeconds <= 60) {
+                el.textContent = `(${elapsedSeconds}s)`;
+            } else {
+                el.textContent = `(${Math.floor(elapsedSeconds / 60)}m ${elapsedSeconds % 60}s)`;
+            }
+        }
+    });
+}, 1000);
 
 function updateSplitSelect() {
     const workersInput = document.getElementById('split-workers');
