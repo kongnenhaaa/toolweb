@@ -6,21 +6,26 @@ const state = {
 };
 
 let lastSyncTime = 0;
+let lastSyncByMachine = {};
+let serverTimeOffset = 0;
 let globalWebStates = {};
 let pendingBalanceChecks = new Set();
 let autoHistoryTimeouts = {};
 
-function scheduleAutoHistory(portId) {
-    if (autoHistoryTimeouts[portId]) {
-        clearTimeout(autoHistoryTimeouts[portId]);
+
+function scheduleAutoHistory(portId, machineId) {
+    // Dùng key kết hợp portId và machineId để tránh xung đột
+    const timeoutKey = `${machineId}_${portId}`;
+    if (autoHistoryTimeouts[timeoutKey]) {
+        clearTimeout(autoHistoryTimeouts[timeoutKey]);
     }
     
     // Tự động chuyển qua lịch sử sau 20 giây
-    autoHistoryTimeouts[portId] = setTimeout(() => {
-        const port = state.ports.find(p => p.id === portId);
+    autoHistoryTimeouts[timeoutKey] = setTimeout(() => {
+        const port = state.ports.find(p => p.id === portId && p.machineId === machineId);
         // Chỉ tự động chuyển nếu cổng chưa bị ẩn (tránh bị push trùng từ nhiều máy khách cùng lúc)
         if (port && !port.hidden) {
-            markAsUsed(portId);
+            markAsUsed(portId, machineId);
         }
     }, 20000);
 }
@@ -63,20 +68,36 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const db = firebase.database();
 
+// Lấy độ lệch thời gian giữa Client và Firebase Server
+db.ref('.info/serverTimeOffset').on('value', function(snapshot) {
+    serverTimeOffset = snapshot.val() || 0;
+});
+
 // Fetch real data from Firebase
 function fetchPorts() {
     db.ref('machines').on('value', (snapshot) => {
         const machinesData = snapshot.val();
         let allPorts = [];
+        const now = Date.now() + serverTimeOffset;
         
         if (machinesData) {
             // Duyệt qua từng máy tính
             Object.keys(machinesData).forEach(machineId => {
                 const machineNode = machinesData[machineId];
-                if (machineNode.ports) {
-                    const portsArray = Object.values(machineNode.ports).filter(p => p);
-                    portsArray.forEach(p => p.machineId = machineId); // Gắn thêm thông tin máy
-                    allPorts = allPorts.concat(portsArray);
+                
+                let lastSync = 0;
+                if (machineNode.server_status && machineNode.server_status.lastSync) {
+                    lastSync = machineNode.server_status.lastSync;
+                    lastSyncByMachine[machineId] = lastSync;
+                }
+                
+                // Chỉ lấy cổng của những máy tính đang sống (cập nhật trong 15s gần nhất)
+                if (now - lastSync <= 15000) {
+                    if (machineNode.ports) {
+                        const portsArray = Object.values(machineNode.ports).filter(p => p);
+                        portsArray.forEach(p => p.machineId = machineId); // Gắn thêm thông tin máy
+                        allPorts = allPorts.concat(portsArray);
+                    }
                 }
             });
         }
@@ -91,7 +112,7 @@ function fetchPorts() {
 
             if (newPort.otp) {
                 if (!existingPort || existingPort.otp !== newPort.otp) {
-                    scheduleAutoHistory(newPort.id);
+                    scheduleAutoHistory(newPort.id, newPort.machineId);
                     // Thông báo khi có OTP mới
                     showToast(`Có mã OTP mới ở cổng ${newPort.id} (${newPort.machineId})!`);
                     playNotificationSound();
@@ -711,9 +732,10 @@ window.refreshAllPorts = function() {
 
 // Mark as Used
 function markAsUsed(portId, machineId) {
-    if (autoHistoryTimeouts[portId]) {
-        clearTimeout(autoHistoryTimeouts[portId]);
-        delete autoHistoryTimeouts[portId];
+    const timeoutKey = `${machineId}_${portId}`;
+    if (autoHistoryTimeouts[timeoutKey]) {
+        clearTimeout(autoHistoryTimeouts[timeoutKey]);
+        delete autoHistoryTimeouts[timeoutKey];
     }
     const portIndex = state.ports.findIndex(p => p.id === portId && p.machineId === machineId);
     if (portIndex > -1) {
@@ -782,12 +804,12 @@ function manualRefresh() {
     showToast('Đã cập nhật dữ liệu mới nhất!');
 }
 
-function simulateOtpArrival(portId, isZalo = false) {
+function simulateOtpArrival(portId, machineId, isZalo = false) {
     setTimeout(() => {
-        const port = state.ports.find(p => p.id === portId);
+        const port = state.ports.find(p => p.id === portId && p.machineId === machineId);
         if (port && !port.hidden) {
             port.otp = isZalo ? Math.floor(1000 + Math.random() * 9000).toString() : Math.floor(100000 + Math.random() * 900000).toString();
-            scheduleAutoHistory(portId);
+            scheduleAutoHistory(portId, machineId);
             renderPorts();
             showToast(`Có mã OTP mới ở cổng ${portId}!`);
         }
@@ -903,25 +925,7 @@ window.onload = () => {
     fetchPorts();
     
     // Firebase on('value') tự động realtime nên không cần setInterval hay SSE nữa
-    
-    // Lắng nghe trạng thái server_status của tất cả các máy
-    db.ref('machines').on('value', (snapshot) => {
-        const data = snapshot.val();
-        if (data) {
-            let maxSync = 0;
-            Object.keys(data).forEach(mId => {
-                if (data[mId].server_status && data[mId].server_status.lastSync) {
-                    if (data[mId].server_status.lastSync > maxSync) {
-                        maxSync = data[mId].server_status.lastSync;
-                    }
-                }
-            });
-            if (maxSync > 0) {
-                lastSyncTime = maxSync;
-                checkConnectionStatus();
-            }
-        }
-    });
+    // Lắng nghe server_status đã được gộp vào fetchPorts() qua lastSyncByMachine
 
     setInterval(checkConnectionStatus, 2000);
 };
@@ -929,13 +933,37 @@ window.onload = () => {
 function checkConnectionStatus() {
     const indicator = document.querySelector('.system-status .status-indicator');
     const textSpan = document.querySelector('.system-status span');
+    
+    const now = Date.now() + serverTimeOffset;
+    let hasChanges = false;
+
+    // Loại bỏ các cổng của máy tính đã chết (không có ping trong 15s)
+    const alivePorts = state.ports.filter(p => {
+        if (p.isTest) return true;
+        const lastSync = lastSyncByMachine[p.machineId] || 0;
+        return (now - lastSync) <= 15000;
+    });
+
+    if (alivePorts.length !== state.ports.length) {
+        state.ports = alivePorts;
+        hasChanges = true;
+    }
+
+    if (hasChanges) {
+        renderPorts();
+    }
+
     if (!indicator || !textSpan) return;
 
     const visibleCount = state.ports.filter(p => !p.hidden && !p.isTest).length;
-    const now = Date.now();
     
-    // Check if we haven't received a heartbeat in 6 seconds
-    if (lastSyncTime === 0 || now - lastSyncTime > 6000) {
+    let isAnyAlive = false;
+    Object.values(lastSyncByMachine).forEach(sync => {
+        if (now - sync <= 15000) isAnyAlive = true;
+    });
+
+    // Nếu không có máy nào sống
+    if (!isAnyAlive && Object.keys(lastSyncByMachine).length > 0) {
         indicator.className = 'status-indicator';
         indicator.style.background = 'red';
         textSpan.textContent = `Hệ thống mất kết nối (${visibleCount} Cổng)`;
