@@ -65,44 +65,60 @@ const db = firebase.database();
 
 // Fetch real data from Firebase
 function fetchPorts() {
-    db.ref('ports').on('value', (snapshot) => {
-        const data = snapshot.val();
-        if (data) {
-            // Convert to array and filter out nulls/undefined if any
-            const portsArray = Object.values(data).filter(p => p);
-            
-            portsArray.forEach(newPort => {
-                const existingPort = state.ports.find(p => p.id === newPort.id);
-
-                // Giữ lại OTP trên giao diện nếu C# lỡ xoá sớm (nhưng SĐT vẫn giữ nguyên)
-                if (!newPort.otp && existingPort && existingPort.otp && existingPort.phone === newPort.phone) {
-                    newPort.otp = existingPort.otp;
-                }
-
-                if (newPort.otp) {
-                    if (!existingPort || existingPort.otp !== newPort.otp) {
-                        scheduleAutoHistory(newPort.id);
-                    }
+    db.ref('machines').on('value', (snapshot) => {
+        const machinesData = snapshot.val();
+        let allPorts = [];
+        
+        if (machinesData) {
+            // Duyệt qua từng máy tính
+            Object.keys(machinesData).forEach(machineId => {
+                const machineNode = machinesData[machineId];
+                if (machineNode.ports) {
+                    const portsArray = Object.values(machineNode.ports).filter(p => p);
+                    portsArray.forEach(p => p.machineId = machineId); // Gắn thêm thông tin máy
+                    allPorts = allPorts.concat(portsArray);
                 }
             });
-            
-            // Retain locally created test ports
-            const testPorts = state.ports.filter(p => p.isTest);
-            state.ports = [...portsArray, ...testPorts];
-            
-            applyWebStates();
-        } else {
-            // Không có dữ liệu
-            state.ports = state.ports.filter(p => p.isTest);
-            renderPorts();
         }
+        
+        allPorts.forEach(newPort => {
+            const existingPort = state.ports.find(p => p.id === newPort.id && p.machineId === newPort.machineId);
+
+            // Giữ lại OTP trên giao diện nếu C# lỡ xoá sớm (nhưng SĐT vẫn giữ nguyên)
+            if (!newPort.otp && existingPort && existingPort.otp && existingPort.phone === newPort.phone) {
+                newPort.otp = existingPort.otp;
+            }
+
+            if (newPort.otp) {
+                if (!existingPort || existingPort.otp !== newPort.otp) {
+                    scheduleAutoHistory(newPort.id);
+                }
+            }
+        });
+        
+        // Retain locally created test ports
+        const testPorts = state.ports.filter(p => p.isTest);
+        state.ports = [...allPorts, ...testPorts];
+        
+        applyWebStates();
     }, (error) => {
         console.error('Lỗi khi tải dữ liệu từ Firebase:', error);
     });
 
-    // Lắng nghe trạng thái dùng chung (ẩn cổng, đã gửi sms)
-    db.ref('web_states/ports').on('value', (snapshot) => {
-        globalWebStates = snapshot.val() || {};
+    // Lắng nghe trạng thái dùng chung (ẩn cổng, đã gửi sms) của TẤT CẢ CÁC MÁY
+    db.ref('web_states/machines').on('value', (snapshot) => {
+        const statesData = snapshot.val();
+        let mergedStates = {};
+        if (statesData) {
+            Object.keys(statesData).forEach(mId => {
+                if (statesData[mId].ports) {
+                    Object.keys(statesData[mId].ports).forEach(pId => {
+                        mergedStates[`${mId}_${pId}`] = statesData[mId].ports[pId];
+                    });
+                }
+            });
+        }
+        globalWebStates = mergedStates;
         applyWebStates();
     });
 }
@@ -113,7 +129,8 @@ function applyWebStates() {
     state.ports.forEach(port => {
         if (port.isTest) return; // Bỏ qua cổng test
 
-        const webState = globalWebStates[port.id] || {};
+        const stateKey = `${port.machineId}_${port.id}`;
+        const webState = globalWebStates[stateKey] || {};
         
         let shouldHide = false;
         let isSmsSent = webState.smsSent || false;
@@ -123,14 +140,14 @@ function applyWebStates() {
             // Đã bị ẩn bởi một người dùng nào đó
             // Ktra xem C# có cập nhật SĐT mới không (thay SIM)?
             if (port.phone && webState.phone && port.phone !== webState.phone && port.phone !== 'N/A' && port.phone !== 'Unknown') {
-                db.ref(`web_states/ports/${port.id}`).remove();
+                db.ref(`web_states/machines/${port.machineId}/ports/${port.id}`).remove();
                 shouldHide = false;
                 isSmsSent = false;
                 errorMsg = null;
             } 
             // Ktra xem C# có cập nhật OTP mới không?
             else if (port.otp && port.otp !== webState.hiddenOtp) {
-                db.ref(`web_states/ports/${port.id}`).remove();
+                db.ref(`web_states/machines/${port.machineId}/ports/${port.id}`).remove();
                 shouldHide = false;
                 isSmsSent = false;
                 errorMsg = null;
@@ -141,7 +158,7 @@ function applyWebStates() {
             // Đang chờ mã nhưng chưa có hiddenOtp
             // Nếu C# cập nhật SĐT mới (thay SIM) thì xoá trạng thái chờ mã
             if (port.phone && webState.phone && port.phone !== webState.phone && port.phone !== 'N/A' && port.phone !== 'Unknown') {
-                db.ref(`web_states/ports/${port.id}`).remove();
+                db.ref(`web_states/machines/${port.machineId}/ports/${port.id}`).remove();
                 isSmsSent = false;
                 errorMsg = null;
             }
@@ -204,65 +221,82 @@ function renderPorts() {
         return;
     }
 
-    portsToRender.forEach(port => {
-        const row = document.createElement('div');
-        row.className = 'grid-row';
-        if (port.smsSent) {
-            row.classList.add('row-highlight-warning');
-        }
-        row.id = `row-${port.id}`;
+    // Nhóm cổng theo Machine
+    const groupedPorts = {};
+    portsToRender.forEach(p => {
+        const mId = p.machineId || 'TEST_MACHINE';
+        if (!groupedPorts[mId]) groupedPorts[mId] = [];
+        groupedPorts[mId].push(p);
+    });
 
-        const statusDot = port.status === 'online' ? 
-            '<div class="status-indicator online"></div>' : 
-            '<div class="status-indicator" style="background: red;"></div>';
+    Object.keys(groupedPorts).forEach(machineId => {
+        // Render Machine Header
+        const header = document.createElement('div');
+        header.className = 'machine-header';
+        header.innerHTML = `<i data-lucide="server"></i> Máy tính: <strong>${machineId}</strong> <span class="badge">${groupedPorts[machineId].length} cổng</span>`;
+        container.appendChild(header);
 
-        let otpContent = port.smsSent ? 
-            `<span style="color: #f39c12">Đang chờ mã... <span class="wait-timer" data-port="${port.id}"></span></span>` : 
-            '<span style="color: var(--text-muted)">Chưa gửi tin nhắn</span>';
+        // Render từng cổng của máy này
+        groupedPorts[machineId].forEach(port => {
+            const row = document.createElement('div');
+            row.className = 'grid-row';
+            if (port.smsSent) {
+                row.classList.add('row-highlight-warning');
+            }
+            row.id = `row-${port.machineId}-${port.id}`;
 
-        const isChecking = pendingBalanceChecks.has(port.id);
-        let actionButtons = `
-            <button class="btn btn-primary" onclick="openSmsModal('${port.id}')" title="Gửi SMS Lấy OTP">
-                <i data-lucide="send"></i> Gửi SMS
-            </button>
-            <button class="btn btn-outline${isChecking ? ' btn-loading' : ''}" id="btn-balance-${port.id}" onclick="checkBalance('${port.id}')" title="Kiểm tra số dư" ${isChecking ? 'disabled' : ''}>
-                ${isChecking ? '<span class="spinner"></span> Đang kiểm tra...' : '<i data-lucide="dollar-sign"></i> Kiểm tra số dư'}
-            </button>
-        `;
+            const statusDot = port.status === 'online' ? 
+                '<div class="status-indicator online"></div>' : 
+                '<div class="status-indicator" style="background: red;"></div>';
 
-        if (port.errorMsg) {
-            otpContent = `<span style="color: var(--danger); font-weight: 500;"><i data-lucide="alert-triangle" style="width: 14px; height: 14px; display: inline; margin-bottom: -2px;"></i> ${port.errorMsg}</span>`;
-        } else if (port.otp) {
-            otpContent = `<span class="otp-badge">${port.otp}</span>`;
-            actionButtons = `
-                <button class="btn btn-success" onclick="markAsUsed('${port.id}')">
-                    <i data-lucide="check-circle"></i> Đã dùng
+            let otpContent = port.smsSent ? 
+                `<span style="color: #f39c12">Đang chờ mã... <span class="wait-timer" data-port="${port.id}" data-machine="${port.machineId}"></span></span>` : 
+                '<span style="color: var(--text-muted)">Chưa gửi tin nhắn</span>';
+
+            const isChecking = pendingBalanceChecks.has(`${port.machineId}_${port.id}`);
+            let actionButtons = `
+                <button class="btn btn-primary" onclick="openSmsModal('${port.id}', '${port.machineId}')" title="Gửi SMS Lấy OTP">
+                    <i data-lucide="send"></i> Gửi SMS
                 </button>
-                <button class="btn btn-outline" onclick="cancelSmsWait('${port.id}')" title="Làm mới trạng thái">
-                    <i data-lucide="refresh-cw"></i> Làm mới
-                </button>
-            `;
-        } else {
-            // Luôn hiển thị button huỷ chờ
-            actionButtons += `
-                <button class="btn btn-outline" onclick="cancelSmsWait('${port.id}')" title="Huỷ trạng thái" style="padding: 0 8px;">
-                    <i data-lucide="x-circle"></i>
+                <button class="btn btn-outline${isChecking ? ' btn-loading' : ''}" id="btn-balance-${port.machineId}-${port.id}" onclick="checkBalance('${port.id}', '${port.machineId}')" title="Kiểm tra số dư" ${isChecking ? 'disabled' : ''}>
+                    ${isChecking ? '<span class="spinner"></span> Đang kiểm tra...' : '<i data-lucide="dollar-sign"></i> Kiểm tra số dư'}
                 </button>
             `;
-        }
 
-        row.innerHTML = `
-            <div class="col-status">${statusDot}</div>
-            <div class="col-port">${port.id}</div>
-            <div class="col-phone">${port.phone ? port.phone.replace(/(\d{4})(\d{3})(\d{3})/, '$1 $2 $3') : '<span style="color:gray; font-style:italic">Trống</span>'}</div>
-            <div class="col-tkc">${port.balance || 'N/A'}</div>
-            <div class="col-otp">${otpContent}</div>
-            <div class="col-actions">
-                ${actionButtons}
-            </div>
-        `;
+            if (port.errorMsg) {
+                otpContent = `<span style="color: var(--danger); font-weight: 500;"><i data-lucide="alert-triangle" style="width: 14px; height: 14px; display: inline; margin-bottom: -2px;"></i> ${port.errorMsg}</span>`;
+            } else if (port.otp) {
+                otpContent = `<span class="otp-badge">${port.otp}</span>`;
+                actionButtons = `
+                    <button class="btn btn-success" onclick="markAsUsed('${port.id}', '${port.machineId}')">
+                        <i data-lucide="check-circle"></i> Đã dùng
+                    </button>
+                    <button class="btn btn-outline" onclick="cancelSmsWait('${port.id}', '${port.machineId}')" title="Làm mới trạng thái">
+                        <i data-lucide="refresh-cw"></i> Làm mới
+                    </button>
+                `;
+            } else {
+                // Luôn hiển thị button huỷ chờ
+                actionButtons += `
+                    <button class="btn btn-outline" onclick="cancelSmsWait('${port.id}', '${port.machineId}')" title="Huỷ trạng thái" style="padding: 0 8px;">
+                        <i data-lucide="x-circle"></i>
+                    </button>
+                `;
+            }
 
-        container.appendChild(row);
+            row.innerHTML = `
+                <div class="col-status">${statusDot}</div>
+                <div class="col-port">${port.id}</div>
+                <div class="col-phone">${port.phone ? port.phone.replace(/(\d{4})(\d{3})(\d{3})/, '$1 $2 $3') : '<span style="color:gray; font-style:italic">Trống</span>'}</div>
+                <div class="col-tkc">${port.balance || 'N/A'}</div>
+                <div class="col-otp">${otpContent}</div>
+                <div class="col-actions">
+                    ${actionButtons}
+                </div>
+            `;
+
+            container.appendChild(row);
+        });
     });
 
     lucide.createIcons();
@@ -276,7 +310,8 @@ setInterval(() => {
     const timers = document.querySelectorAll('.wait-timer');
     timers.forEach(el => {
         const portId = el.getAttribute('data-port');
-        const port = state.ports.find(p => p.id === portId);
+        const machineId = el.getAttribute('data-machine');
+        const port = state.ports.find(p => p.id === portId && p.machineId === machineId);
         if (port && port.smsSentTime) {
             const elapsedSeconds = Math.floor((Date.now() - port.smsSentTime) / 1000);
             if (elapsedSeconds <= 60) {
@@ -346,12 +381,12 @@ function renderHistory() {
         row.className = 'grid-row';
 
         row.innerHTML = `
-            <div class="col-port">${item.id}</div>
+            <div class="col-port">${item.id} <br><span style="font-size: 11px; color: #aaa;">${item.machineId || ''}</span></div>
             <div class="col-phone">${item.phone ? item.phone.replace(/(\d{4})(\d{3})(\d{3})/, '$1 $2 $3') : '<span style="color:gray; font-style:italic">Trống</span>'}</div>
             <div class="col-otp"><span style="color: var(--success); font-weight: bold;">${item.otp}</span></div>
             <div class="col-time">${item.usedTime}</div>
             <div class="col-actions">
-                <button class="btn btn-primary" onclick="restoreFromHistory('${item.id}', '${item.usedTime}', '${item.fbKey}')" title="Khôi phục trạng thái hoạt động">
+                <button class="btn btn-primary" onclick="restoreFromHistory('${item.id}', '${item.machineId}', '${item.usedTime}', '${item.fbKey}')" title="Khôi phục trạng thái hoạt động">
                     <i data-lucide="rotate-ccw"></i> Khôi phục
                 </button>
             </div>
@@ -434,11 +469,13 @@ function exportHistoryToExcel() {
 }
 
 // Modal Logic
-function openSmsModal(portId) {
+let currentActionMachineId = null;
+function openSmsModal(portId, machineId) {
     state.currentActionPortId = portId;
-    const port = state.ports.find(p => p.id === portId);
+    currentActionMachineId = machineId;
+    const port = state.ports.find(p => p.id === portId && p.machineId === machineId);
     
-    document.getElementById('sms-port-name').textContent = port.id;
+    document.getElementById('sms-port-name').textContent = port.id + (machineId ? ` (${machineId})` : '');
     document.getElementById('sms-phone-number').textContent = port.phone || 'Chưa có SĐT';
 
     // Hiển thị nhà mạng trong modal
@@ -494,6 +531,7 @@ function closeModal(modalId) {
 // Execute actions
 async function executeSendSms() {
     const actionPortId = state.currentActionPortId;
+    const actionMachineId = currentActionMachineId;
     if (!actionPortId) return;
 
     let recipient = document.getElementById('sms-recipient-select').value;
@@ -528,6 +566,7 @@ async function executeSendSms() {
             // Đẩy lệnh lên Firebase để phần mềm C# nhận
             const commandRef = db.ref('commands').push();
             await commandRef.set({
+                machineId: actionMachineId,
                 portId: actionPortId,
                 recipient: rec,
                 content: content,
@@ -535,16 +574,17 @@ async function executeSendSms() {
             });
         }
         
-        const port = state.ports.find(p => p.id === actionPortId);
+        const port = state.ports.find(p => p.id === actionPortId && p.machineId === actionMachineId);
         if (port && !port.isTest) {
             // Xoá OTP cũ hiển thị trên trình duyệt để chuyển sang trạng thái "Đang chờ mã..."
             port.otp = null;
             port.errorMsg = null;
             
-            db.ref(`ports/${actionPortId}/otp`).remove();
+            db.ref(`machines/${actionMachineId}/ports/${actionPortId}/otp`).remove();
             
-            db.ref(`web_states/ports/${actionPortId}`).update({
+            db.ref(`web_states/machines/${actionMachineId}/ports/${actionPortId}`).update({
                 smsSent: true,
+                smsSentTime: firebase.database.ServerValue.TIMESTAMP,
                 errorMsg: null,
                 phone: port.phone || 'NONE'
             });
@@ -555,9 +595,9 @@ async function executeSendSms() {
         }
         
         if (recipients.length > 1) {
-            showToast(`Đã gửi ${recipients.length} lệnh SMS từ ${actionPortId}`);
+            showToast(`Đã gửi ${recipients.length} lệnh SMS từ ${actionPortId} (${actionMachineId})`);
         } else {
-            showToast(`Đã gửi lệnh SMS từ ${actionPortId} đến ${recipients[0]}`);
+            showToast(`Đã gửi lệnh SMS từ ${actionPortId} (${actionMachineId}) đến ${recipients[0]}`);
         }
     } catch (error) {
         showToast('Không thể đẩy lệnh lên Firebase!', 'error');
@@ -566,54 +606,56 @@ async function executeSendSms() {
     closeModal('sms-modal');
 }
 
-window.checkBalance = async function(portId) {
+window.checkBalance = async function(portId, machineId) {
     if (portId.startsWith('COM_TEST')) {
         showToast(`[TEST] Đã gửi lệnh kiểm tra số dư cho cổng ${portId}`);
         return;
     }
 
-    if (pendingBalanceChecks.has(portId)) return; // Đang kiểm tra rồi
+    const stateKey = `${machineId}_${portId}`;
+    if (pendingBalanceChecks.has(stateKey)) return; // Đang kiểm tra rồi
 
     try {
-        pendingBalanceChecks.add(portId);
+        pendingBalanceChecks.add(stateKey);
         renderPorts();
 
         const commandRef = db.ref('commands').push();
         await commandRef.set({
+            machineId: machineId,
             portId: portId,
             recipient: 'USSD',
             content: 'BALANCE',
             timestamp: firebase.database.ServerValue.TIMESTAMP
         });
-        showToast(`Đã gửi lệnh kiểm tra số dư cho cổng ${portId}`);
+        showToast(`Đã gửi lệnh kiểm tra số dư cho cổng ${portId} (${machineId})`);
 
         // Tự tắt spinner sau 15s nếu không nhận được kết quả
         setTimeout(() => {
-            if (pendingBalanceChecks.has(portId)) {
-                pendingBalanceChecks.delete(portId);
+            if (pendingBalanceChecks.has(stateKey)) {
+                pendingBalanceChecks.delete(stateKey);
                 renderPorts();
             }
         }, 15000);
     } catch (error) {
-        pendingBalanceChecks.delete(portId);
+        pendingBalanceChecks.delete(stateKey);
         renderPorts();
         showToast('Không thể đẩy lệnh lên Firebase!', 'error');
     }
 }
 
-window.cancelSmsWait = function(portId) {
-    db.ref(`web_states/ports/${portId}`).remove();
-    db.ref(`ports/${portId}/otp`).remove();
+window.cancelSmsWait = function(portId, machineId) {
+    db.ref(`web_states/machines/${machineId}/ports/${portId}`).remove();
+    db.ref(`machines/${machineId}/ports/${portId}/otp`).remove();
     
     // Xoá OTP trên giao diện nếu đang có
-    const port = state.ports.find(p => p.id === portId);
+    const port = state.ports.find(p => p.id === portId && p.machineId === machineId);
     if (port) {
         if (port.otp) port.otp = null;
         port.smsSent = false;
         renderPorts();
     }
     
-    showToast(`Đã huỷ trạng thái cho cổng ${portId}`);
+    showToast(`Đã huỷ trạng thái cho cổng ${portId} (${machineId})`);
 }
 
 window.cancelAllSmsWait = function() {
@@ -625,8 +667,8 @@ window.cancelAllSmsWait = function() {
 
     showToast(`Đang huỷ trạng thái chờ cho ${visiblePorts.length} cổng...`);
     visiblePorts.forEach(port => {
-        db.ref(`web_states/ports/${port.id}`).remove();
-        db.ref(`ports/${port.id}/otp`).remove();
+        db.ref(`web_states/machines/${port.machineId}/ports/${port.id}`).remove();
+        db.ref(`machines/${port.machineId}/ports/${port.id}/otp`).remove();
         if (port.otp) port.otp = null;
         port.smsSent = false;
     });
@@ -643,28 +685,34 @@ window.checkAllBalance = async function() {
 
     showToast(`Đang gửi lệnh kiểm tra TKC cho ${visiblePorts.length} cổng...`);
     for (const port of visiblePorts) {
-        await checkBalance(port.id);
+        await checkBalance(port.id, port.machineId);
     }
 }
 
 window.refreshAllPorts = function() {
-    showToast('Đang gửi lệnh làm mới toàn bộ cổng...');
-    const commandRef = db.ref('commands').push();
-    commandRef.set({
-        portId: 'ALL',
-        recipient: 'SYSTEM',
-        content: 'REFRESH_ALL',
-        timestamp: firebase.database.ServerValue.TIMESTAMP
+    showToast('Đang gửi lệnh làm mới toàn bộ cổng trên tất cả các máy...');
+    // Lấy danh sách các máy tính đang hoạt động
+    const activeMachines = [...new Set(state.ports.filter(p => !p.isTest).map(p => p.machineId))];
+    
+    activeMachines.forEach(mId => {
+        const commandRef = db.ref('commands').push();
+        commandRef.set({
+            machineId: mId,
+            portId: 'ALL',
+            recipient: 'SYSTEM',
+            content: 'REFRESH_ALL',
+            timestamp: firebase.database.ServerValue.TIMESTAMP
+        });
     });
 }
 
 // Mark as Used
-function markAsUsed(portId) {
+function markAsUsed(portId, machineId) {
     if (autoHistoryTimeouts[portId]) {
         clearTimeout(autoHistoryTimeouts[portId]);
         delete autoHistoryTimeouts[portId];
     }
-    const portIndex = state.ports.findIndex(p => p.id === portId);
+    const portIndex = state.ports.findIndex(p => p.id === portId && p.machineId === machineId);
     if (portIndex > -1) {
         const port = state.ports[portIndex];
         
@@ -673,7 +721,7 @@ function markAsUsed(portId) {
         port.isMarking = true;
         
         // Add exit animation class
-        const row = document.getElementById(`row-${portId}`);
+        const row = document.getElementById(`row-${port.machineId}-${port.id}`);
         if(row) {
             row.classList.add('row-exit');
             
@@ -685,7 +733,7 @@ function markAsUsed(portId) {
             });
             
             // Đồng bộ trạng thái ẨN cho mọi người
-            db.ref(`web_states/ports/${portId}`).update({
+            db.ref(`web_states/machines/${port.machineId}/ports/${port.id}`).update({
                 hiddenOtp: port.otp || 'NONE',
                 phone: port.phone || 'NONE'
             });
@@ -697,12 +745,12 @@ function markAsUsed(portId) {
     }
 }
 
-function restoreFromHistory(portId, usedTime, fbKey) {
+function restoreFromHistory(portId, machineId, usedTime, fbKey) {
     // Xoá trạng thái ẩn trên Firebase cho tất cả mọi người
-    db.ref(`web_states/ports/${portId}`).remove();
+    db.ref(`web_states/machines/${machineId}/ports/${portId}`).remove();
     
     // Cập nhật state local
-    const port = state.ports.find(p => p.id === portId);
+    const port = state.ports.find(p => p.id === portId && p.machineId === machineId);
     if (port) {
         port.hidden = false;
         port.smsSent = false;
@@ -722,7 +770,7 @@ function restoreFromHistory(portId, usedTime, fbKey) {
         }
     }
     
-    showToast(`Đã khôi phục cổng ${portId} về trạng thái đang hoạt động.`);
+    showToast(`Đã khôi phục cổng ${portId} (${machineId}) về trạng thái đang hoạt động.`);
 }
 
 // Simulation helpers

@@ -316,6 +316,37 @@ h1 {
     transition: all 0.2s;
 }
 
+.machine-header {
+    padding: 12px 24px;
+    background: rgba(59, 130, 246, 0.15);
+    border-bottom: 1px solid var(--primary-color);
+    border-top: 1px solid var(--border-color);
+    font-size: 15px;
+    color: var(--text-main);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    backdrop-filter: blur(10px);
+}
+
+.machine-header i {
+    color: var(--primary-color);
+    width: 18px;
+    height: 18px;
+}
+
+.badge {
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--text-muted);
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 12px;
+    margin-left: 8px;
+}
+
 .grid-row:hover {
     background: rgba(255, 255, 255, 0.03);
 }
