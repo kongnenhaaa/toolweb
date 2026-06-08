@@ -416,20 +416,42 @@ function openSmsModal(portId) {
     const port = state.ports.find(p => p.id === portId);
     
     document.getElementById('sms-port-name').textContent = port.id;
-    document.getElementById('sms-phone-number').textContent = port.phone;
-    
-    // Không reset lại đầu số về 8500 nữa, để UI nhớ lựa chọn cuối cùng của người dùng (ví dụ họ đang gửi hàng loạt cho 7539)
-    // document.getElementById('sms-recipient-select').value = '8500';
-    
-    // Nếu họ đang ở chế độ custom thì giữ nguyên, ngược lại thì ẩn
+    document.getElementById('sms-phone-number').textContent = port.phone || 'Chưa có SĐT';
+
+    // Hiển thị nhà mạng trong modal
+    const networkEl = document.getElementById('sms-network-badge');
+    if (networkEl) {
+        const net = (port.network || 'UNKNOWN').toUpperCase();
+        let badgeColor = '#888';
+        if (net.includes('VIETTEL'))  badgeColor = '#e74c3c';
+        if (net.includes('VINA') || net.includes('VINAPHONE')) badgeColor = '#2980b9';
+        if (net.includes('MOBI'))     badgeColor = '#27ae60';
+        networkEl.textContent = port.network || 'UNKNOWN';
+        networkEl.style.background = badgeColor;
+    }
+
+    // Tự động chọn đầu số đúng theo nhà mạng
     const select = document.getElementById('sms-recipient-select');
     const customInput = document.getElementById('sms-recipient-custom');
-    if (select.value !== 'custom') {
+    const net = (port.network || '').toUpperCase();
+
+    if (net.includes('VIETTEL')) {
+        select.value = '7539';
+    } else if (net.includes('VINA') || net.includes('VINAPHONE')) {
+        select.value = '8500';
+    } else if (net.includes('MOBI')) {
+        select.value = '9369';
+    }
+    // Nếu chưa biết nhà mạng, giữ nguyên lựa chọn cuối cùng của user
+
+    if (select.value === 'custom') {
+        // giữ hiện custom input nếu đang ở mode custom
+    } else {
         customInput.value = '';
         customInput.style.display = 'none';
     }
     
-    document.getElementById('sms-content').value = 'ZALO'; // Default content
+    document.getElementById('sms-content').value = 'ZALO';
     
     document.getElementById('sms-modal').classList.add('active');
 }
