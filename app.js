@@ -430,20 +430,8 @@ function openSmsModal(portId) {
         networkEl.style.background = badgeColor;
     }
 
-    // Tự động chọn đầu số đúng theo nhà mạng
-    const select = document.getElementById('sms-recipient-select');
-    const customInput = document.getElementById('sms-recipient-custom');
-    const net = (port.network || '').toUpperCase();
-
-    if (net.includes('VIETTEL')) {
-        select.value = '7539';
-    } else if (net.includes('VINA') || net.includes('VINAPHONE')) {
-        select.value = '8500';
-    } else if (net.includes('MOBI')) {
-        select.value = '9369';
-    }
-    // Nếu chưa biết nhà mạng, giữ nguyên lựa chọn cuối cùng của user
-
+    // Không tự động đổi đầu số theo nhà mạng vì Zalo có thể yêu cầu gửi 8500 từ SIM Viettel và ngược lại.
+    // UI sẽ giữ nguyên lựa chọn cuối cùng của người dùng.
     if (select.value === 'custom') {
         // giữ hiện custom input nếu đang ở mode custom
     } else {
