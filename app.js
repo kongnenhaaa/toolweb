@@ -92,6 +92,9 @@ function fetchPorts() {
             if (newPort.otp) {
                 if (!existingPort || existingPort.otp !== newPort.otp) {
                     scheduleAutoHistory(newPort.id);
+                    // Thông báo khi có OTP mới
+                    showToast(`Có mã OTP mới ở cổng ${newPort.id} (${newPort.machineId})!`);
+                    playNotificationSound();
                 }
             }
         });
@@ -901,28 +904,22 @@ window.onload = () => {
     
     // Firebase on('value') tự động realtime nên không cần setInterval hay SSE nữa
     
-    // Lắng nghe thông báo OTP mới từ Firebase
-    db.ref('ports').on('child_changed', (snapshot) => {
-        const port = snapshot.val();
-        if (port && port.otp) {
-            const existingPort = state.ports.find(p => p.id === port.id);
-            if (!existingPort || existingPort.otp !== port.otp) {
-                showToast(`Có mã OTP mới ở cổng ${port.id}!`);
-                playNotificationSound();
-            }
-        }
-        // Tắt spinner kiểm tra TKC khi balance thay đổi
-        if (port && port.id && pendingBalanceChecks.has(port.id)) {
-            pendingBalanceChecks.delete(port.id);
-            // renderPorts sẽ được gọi bởi fetchPorts listener
-        }
-    });
-
-    db.ref('server_status').on('value', (snapshot) => {
+    // Lắng nghe trạng thái server_status của tất cả các máy
+    db.ref('machines').on('value', (snapshot) => {
         const data = snapshot.val();
-        if (data && data.lastSync) {
-            lastSyncTime = data.lastSync;
-            checkConnectionStatus();
+        if (data) {
+            let maxSync = 0;
+            Object.keys(data).forEach(mId => {
+                if (data[mId].server_status && data[mId].server_status.lastSync) {
+                    if (data[mId].server_status.lastSync > maxSync) {
+                        maxSync = data[mId].server_status.lastSync;
+                    }
+                }
+            });
+            if (maxSync > 0) {
+                lastSyncTime = maxSync;
+                checkConnectionStatus();
+            }
         }
     });
 
