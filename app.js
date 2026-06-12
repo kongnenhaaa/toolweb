@@ -11,6 +11,85 @@ let serverTimeOffset = 0;
 let globalWebStates = {};
 let pendingBalanceChecks = new Set();
 let autoHistoryTimeouts = {};
+let commandResults = {};
+let appliedCommandResults = {};
+
+const SMS_WAIT_TIMEOUT_MS = 120000;
+const BALANCE_COMMAND_SPACING_MS = 1200;
+
+function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function getServerNow() {
+    return Date.now() + serverTimeOffset;
+}
+
+function toFirebaseKey(value) {
+    return String(value || 'NONE').replace(/[.#$/\[\]]/g, '_');
+}
+
+async function createCommand({ machineId, portId, recipient, content, type = 'sms' }) {
+    const commandRef = db.ref('commands').push();
+    const commandId = commandRef.key;
+    await commandRef.set({
+        id: commandId,
+        machineId,
+        portId,
+        recipient,
+        content,
+        type,
+        status: 'queued',
+        createdAt: firebase.database.ServerValue.TIMESTAMP,
+        updatedAt: firebase.database.ServerValue.TIMESTAMP
+    });
+    return commandId;
+}
+
+function applyCommandResult(commandId, result) {
+    if (!result || !result.machineId || !result.portId) return;
+    if (result.updatedAt && getServerNow() - result.updatedAt > 10 * 60 * 1000) return;
+
+    const stateKey = `${result.machineId}_${result.portId}`;
+    const status = result.status || 'unknown';
+    const type = result.type || (result.recipient === 'USSD' ? 'balance' : 'sms');
+
+    if (type === 'balance') {
+        pendingBalanceChecks.delete(stateKey);
+    }
+
+    const port = state.ports.find(p => p.id === result.portId && p.machineId === result.machineId);
+    if (port) {
+        port.commandId = commandId;
+        port.commandStatus = status;
+    }
+
+    if (status === 'failed') {
+        pendingBalanceChecks.delete(stateKey);
+        db.ref(`web_states/machines/${result.machineId}/ports/${result.portId}`).update({
+            smsSent: false,
+            commandId,
+            commandStatus: 'failed',
+            errorMsg: result.error || 'Lệnh thất bại',
+            failedAt: firebase.database.ServerValue.TIMESTAMP
+        });
+        if (port) {
+            port.smsSent = false;
+            port.errorMsg = result.error || 'Lệnh thất bại';
+        }
+    } else if (status === 'sent' || status === 'done') {
+        db.ref(`web_states/machines/${result.machineId}/ports/${result.portId}`).update({
+            commandId,
+            commandStatus: status,
+            errorMsg: null
+        });
+        if (port) {
+            port.errorMsg = null;
+        }
+    }
+
+    renderPorts();
+}
 
 
 function scheduleAutoHistory(portId, machineId) {
@@ -169,6 +248,20 @@ function applyWebStates() {
         let shouldHide = false;
         let isSmsSent = webState.smsSent || false;
         let errorMsg = webState.errorMsg || null;
+        const smsSentTime = webState.smsSentTime || port.smsSentTime || null;
+
+        if (isSmsSent && smsSentTime && !port.otp && !errorMsg) {
+            const elapsed = getServerNow() - smsSentTime;
+            if (elapsed > SMS_WAIT_TIMEOUT_MS) {
+                errorMsg = 'Quá thời gian chờ OTP';
+                isSmsSent = false;
+                db.ref(`web_states/machines/${port.machineId}/ports/${port.id}`).update({
+                    smsSent: false,
+                    errorMsg,
+                    timedOutAt: firebase.database.ServerValue.TIMESTAMP
+                });
+            }
+        }
 
         if (webState.hiddenOtp) {
             // Đã bị ẩn bởi một người dùng nào đó
@@ -198,8 +291,10 @@ function applyWebStates() {
             }
         }
 
-        if (isSmsSent && !port.smsSentTime) {
-            port.smsSentTime = Date.now();
+        if (isSmsSent && smsSentTime) {
+            port.smsSentTime = smsSentTime;
+        } else if (isSmsSent && !port.smsSentTime) {
+            port.smsSentTime = getServerNow();
         } else if (!isSmsSent) {
             port.smsSentTime = null;
         }
@@ -217,6 +312,8 @@ function applyWebStates() {
             }
         }
 
+        port.commandId = webState.commandId || null;
+        port.commandStatus = webState.commandStatus || null;
         port.hidden = shouldHide;
         port.smsSent = isSmsSent;
         port.errorMsg = errorMsg;
@@ -371,7 +468,7 @@ setInterval(() => {
         const machineId = el.getAttribute('data-machine');
         const port = state.ports.find(p => p.id === portId && p.machineId === machineId);
         if (port && port.smsSentTime) {
-            const elapsedSeconds = Math.floor((Date.now() - port.smsSentTime) / 1000);
+            const elapsedSeconds = Math.floor((getServerNow() - port.smsSentTime) / 1000);
             if (elapsedSeconds <= 60) {
                 el.textContent = `(${elapsedSeconds}s)`;
             } else {
@@ -619,17 +716,17 @@ async function executeSendSms() {
     
     try {
         const recipients = recipient.split(',').map(r => r.trim()).filter(r => r);
+        const commandIds = [];
         
         for (const rec of recipients) {
-            // Đẩy lệnh lên Firebase để phần mềm C# nhận
-            const commandRef = db.ref('commands').push();
-            await commandRef.set({
+            const commandId = await createCommand({
                 machineId: actionMachineId,
                 portId: actionPortId,
                 recipient: rec,
                 content: content,
-                timestamp: firebase.database.ServerValue.TIMESTAMP
+                type: 'sms'
             });
+            commandIds.push(commandId);
         }
         
         const port = state.ports.find(p => p.id === actionPortId && p.machineId === actionMachineId);
@@ -643,6 +740,8 @@ async function executeSendSms() {
             db.ref(`web_states/machines/${actionMachineId}/ports/${actionPortId}`).update({
                 smsSent: true,
                 smsSentTime: firebase.database.ServerValue.TIMESTAMP,
+                commandId: commandIds[commandIds.length - 1] || null,
+                commandStatus: 'queued',
                 errorMsg: null,
                 phone: port.phone || 'NONE'
             });
@@ -677,23 +776,31 @@ window.checkBalance = async function(portId, machineId) {
         pendingBalanceChecks.add(stateKey);
         renderPorts();
 
-        const commandRef = db.ref('commands').push();
-        await commandRef.set({
+        const commandId = await createCommand({
             machineId: machineId,
             portId: portId,
             recipient: 'USSD',
             content: 'BALANCE',
-            timestamp: firebase.database.ServerValue.TIMESTAMP
+            type: 'balance'
+        });
+        await db.ref(`web_states/machines/${machineId}/ports/${portId}`).update({
+            commandId,
+            commandStatus: 'queued',
+            errorMsg: null
         });
         showToast(`Đã gửi lệnh kiểm tra số dư cho cổng ${portId} (${machineId})`);
 
-        // Tự tắt spinner sau 15s nếu không nhận được kết quả
+        // Tự tắt spinner sau 45s nếu không nhận được kết quả
         setTimeout(() => {
             if (pendingBalanceChecks.has(stateKey)) {
                 pendingBalanceChecks.delete(stateKey);
+                db.ref(`web_states/machines/${machineId}/ports/${portId}`).update({
+                    commandStatus: 'timeout',
+                    errorMsg: 'Kiểm tra số dư quá thời gian'
+                });
                 renderPorts();
             }
-        }, 15000);
+        }, 45000);
     } catch (error) {
         pendingBalanceChecks.delete(stateKey);
         renderPorts();
@@ -741,9 +848,13 @@ window.checkAllBalance = async function() {
         return;
     }
 
-    showToast(`Đang gửi lệnh kiểm tra TKC cho ${visiblePorts.length} cổng...`);
-    for (const port of visiblePorts) {
+    showToast(`Đang xếp hàng kiểm tra TKC cho ${visiblePorts.length} cổng...`);
+    for (let i = 0; i < visiblePorts.length; i++) {
+        const port = visiblePorts[i];
         await checkBalance(port.id, port.machineId);
+        if (i < visiblePorts.length - 1) {
+            await sleep(BALANCE_COMMAND_SPACING_MS);
+        }
     }
 }
 
@@ -753,19 +864,18 @@ window.refreshAllPorts = function() {
     const activeMachines = [...new Set(state.ports.filter(p => !p.isTest).map(p => p.machineId))];
     
     activeMachines.forEach(mId => {
-        const commandRef = db.ref('commands').push();
-        commandRef.set({
+        createCommand({
             machineId: mId,
             portId: 'ALL',
             recipient: 'SYSTEM',
             content: 'REFRESH_ALL',
-            timestamp: firebase.database.ServerValue.TIMESTAMP
+            type: 'system'
         });
     });
 }
 
 // Mark as Used
-function markAsUsed(portId, machineId) {
+async function markAsUsed(portId, machineId) {
     const timeoutKey = `${machineId}_${portId}`;
     if (autoHistoryTimeouts[timeoutKey]) {
         clearTimeout(autoHistoryTimeouts[timeoutKey]);
@@ -784,12 +894,28 @@ function markAsUsed(portId, machineId) {
         if(row) {
             row.classList.add('row-exit');
             
-            // Add to history trên Firebase
-            db.ref('history').push({
-                ...port,
-                usedTime: new Date().toLocaleTimeString('vi-VN'),
-                timestamp: firebase.database.ServerValue.TIMESTAMP
-            });
+            const phoneKey = toFirebaseKey((port.phone || 'NO_PHONE').replace(/\s+/g, ''));
+            const otpKey = toFirebaseKey(port.otp || 'NO_OTP');
+            const historyKey = `${toFirebaseKey(machineId)}_${toFirebaseKey(portId)}_${phoneKey}_${otpKey}`;
+            const historyRef = db.ref(`history/${historyKey}`);
+
+            try {
+                const result = await historyRef.transaction(current => {
+                    if (current) return current;
+                    return {
+                        ...port,
+                        usedTime: new Date().toLocaleTimeString('vi-VN'),
+                        timestamp: firebase.database.ServerValue.TIMESTAMP
+                    };
+                });
+                if (!result.committed && result.snapshot.exists()) {
+                    showToast(`SĐT ${port.phone} đã có trong lịch sử.`);
+                }
+            } catch (error) {
+                showToast('Không thể lưu lịch sử OTP!', 'error');
+                port.isMarking = false;
+                return;
+            }
             
             // Đồng bộ trạng thái ẨN cho mọi người
             db.ref(`web_states/machines/${port.machineId}/ports/${port.id}`).update({
@@ -957,6 +1083,16 @@ window.onload = () => {
         
         // Gọi lại applyWebStates để lập tức ẩn các số vừa vào lịch sử
         applyWebStates();
+    });
+
+    db.ref('command_results').orderByChild('updatedAt').limitToLast(200).on('value', (snapshot) => {
+        commandResults = snapshot.val() || {};
+        Object.entries(commandResults).forEach(([commandId, result]) => {
+            const signature = `${result.status || ''}_${result.updatedAt || ''}_${result.error || ''}`;
+            if (appliedCommandResults[commandId] === signature) return;
+            appliedCommandResults[commandId] = signature;
+            applyCommandResult(commandId, result);
+        });
     });
 
     fetchPorts();
