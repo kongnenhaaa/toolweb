@@ -248,7 +248,18 @@ function renderPorts() {
     }
 
     // After assigning the stable chunk, filter out the hidden ones
-    const portsToRender = myAssignedPorts.filter(p => !p.hidden);
+    let portsToRender = myAssignedPorts.filter(p => !p.hidden);
+
+    const filter5kChecked = document.getElementById('filter-balance-5k')?.checked;
+    if (filter5kChecked) {
+        portsToRender = portsToRender.filter(p => {
+            if (!p.balance) return false;
+            // Parse số từ chuỗi ví dụ: "TKC 15000 VND" -> 15000
+            const numStr = p.balance.replace(/[^\d]/g, '');
+            const balanceNum = parseInt(numStr) || 0;
+            return balanceNum >= 5000;
+        });
+    }
 
     if (portsToRender.length === 0) {
         container.innerHTML = `<div style="padding: 40px; text-align: center; color: var(--text-muted);">Không có cổng nào (hoặc đã dùng hết) trong phần này.</div>`;
