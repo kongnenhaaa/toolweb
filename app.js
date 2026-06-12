@@ -74,6 +74,8 @@ db.ref('.info/serverTimeOffset').on('value', function(snapshot) {
 });
 
 // Fetch real data from Firebase
+let isInitialFirebaseLoad = true;
+
 function fetchPorts() {
     db.ref('machines').on('value', (snapshot) => {
         const machinesData = snapshot.val();
@@ -116,7 +118,8 @@ function fetchPorts() {
             }
 
             if (newPort.otp) {
-                if (!existingPort || existingPort.otp !== newPort.otp) {
+                // Chỉ thông báo nếu không phải lần tải dữ liệu đầu tiên khi vừa mở/refresh trang web
+                if (!isInitialFirebaseLoad && (!existingPort || existingPort.otp !== newPort.otp)) {
                     scheduleAutoHistory(newPort.id, newPort.machineId);
                     // Thông báo khi có OTP mới
                     showToast(`Có mã OTP mới ở cổng ${newPort.id} (${newPort.machineId})!`);
@@ -124,6 +127,8 @@ function fetchPorts() {
                 }
             }
         });
+        
+        isInitialFirebaseLoad = false;
         
         // Retain locally created test ports
         const testPorts = state.ports.filter(p => p.isTest);
