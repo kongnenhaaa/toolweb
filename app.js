@@ -29,6 +29,13 @@ function toFirebaseKey(value) {
     return String(value || 'NONE').replace(/[.#$/\[\]]/g, '_');
 }
 
+function isSpecificSmsError(message) {
+    if (!message) return false;
+    return message.includes('Chọn sai đầu số')
+        || message.includes('SĐT đang không yêu cầu mã')
+        || message.includes('Hết tiền');
+}
+
 async function createCommand({ machineId, portId, recipient, content, type = 'sms' }) {
     const commandRef = db.ref('commands').push();
     const commandId = commandRef.key;
@@ -68,17 +75,22 @@ function applyCommandResult(commandId, result) {
     }
 
     if (status === 'failed') {
+        const currentError = webState.errorMsg || null;
+        const nextError = isSpecificSmsError(currentError)
+            ? currentError
+            : (result.error || 'Lệnh thất bại');
+
         pendingBalanceChecks.delete(stateKey);
         db.ref(`web_states/machines/${result.machineId}/ports/${result.portId}`).update({
             smsSent: false,
             commandId,
             commandStatus: 'failed',
-            errorMsg: result.error || 'Lệnh thất bại',
+            errorMsg: nextError,
             failedAt: firebase.database.ServerValue.TIMESTAMP
         });
         if (port) {
             port.smsSent = false;
-            port.errorMsg = result.error || 'Lệnh thất bại';
+            port.errorMsg = nextError;
         }
     } else if (status === 'sent' || status === 'done') {
         db.ref(`web_states/machines/${result.machineId}/ports/${result.portId}`).update({
