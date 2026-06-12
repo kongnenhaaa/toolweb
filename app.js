@@ -51,6 +51,9 @@ function applyCommandResult(commandId, result) {
     if (result.updatedAt && getServerNow() - result.updatedAt > 10 * 60 * 1000) return;
 
     const stateKey = `${result.machineId}_${result.portId}`;
+    const webState = globalWebStates[stateKey] || {};
+    if (webState.commandId && webState.commandId !== commandId) return;
+
     const status = result.status || 'unknown';
     const type = result.type || (result.recipient === 'USSD' ? 'balance' : 'sms');
 
