@@ -204,6 +204,19 @@ function applyWebStates() {
             port.smsSentTime = null;
         }
 
+        // TỰ ĐỘNG ẨN NẾU SĐT ĐÃ CÓ TRONG LỊCH SỬ (HISTORY)
+        if (!shouldHide && port.phone && port.phone !== 'N/A' && port.phone !== 'Unknown') {
+            // Xóa hết khoảng trắng nếu có để so sánh chính xác
+            const cleanPhone = port.phone.replace(/\s+/g, '');
+            const inHistory = state.history.some(h => {
+                const hPhone = h.phone ? h.phone.replace(/\s+/g, '') : '';
+                return hPhone === cleanPhone;
+            });
+            if (inHistory) {
+                shouldHide = true;
+            }
+        }
+
         port.hidden = shouldHide;
         port.smsSent = isSmsSent;
         port.errorMsg = errorMsg;
@@ -941,6 +954,9 @@ window.onload = () => {
         if (document.getElementById('history-view').style.display === 'flex') {
             renderHistory();
         }
+        
+        // Gọi lại applyWebStates để lập tức ẩn các số vừa vào lịch sử
+        applyWebStates();
     });
 
     fetchPorts();
