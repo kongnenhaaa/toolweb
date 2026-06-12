@@ -13,6 +13,7 @@ let pendingBalanceChecks = new Set();
 let autoHistoryTimeouts = {};
 let commandResults = {};
 let appliedCommandResults = {};
+let sendingSmsPorts = new Set();
 
 const SMS_WAIT_TIMEOUT_MS = 120000;
 const BALANCE_COMMAND_SPACING_MS = 1200;
@@ -93,13 +94,18 @@ function applyCommandResult(commandId, result) {
             port.errorMsg = nextError;
         }
     } else if (status === 'sent' || status === 'done') {
-        db.ref(`web_states/machines/${result.machineId}/ports/${result.portId}`).update({
+        const currentError = webState.errorMsg || null;
+        const updatePayload = {
             commandId,
-            commandStatus: status,
-            errorMsg: null
-        });
+            commandStatus: status
+        };
+        if (!isSpecificSmsError(currentError)) {
+            updatePayload.errorMsg = null;
+        }
+
+        db.ref(`web_states/machines/${result.machineId}/ports/${result.portId}`).update(updatePayload);
         if (port) {
-            port.errorMsg = null;
+            port.errorMsg = isSpecificSmsError(currentError) ? currentError : null;
         }
     }
 
@@ -704,6 +710,25 @@ async function executeSendSms() {
     const actionMachineId = currentActionMachineId;
     if (!actionPortId) return;
 
+    const actionKey = `${actionMachineId}_${actionPortId}`;
+    const actionPort = state.ports.find(p => p.id === actionPortId && p.machineId === actionMachineId);
+    const webState = globalWebStates[actionKey] || {};
+
+    if (sendingSmsPorts.has(actionKey)) {
+        showToast('Lệnh gửi SMS đang được tạo, vui lòng đợi.', 'error');
+        return;
+    }
+
+    if (webState.commandStatus === 'queued' || webState.commandStatus === 'running') {
+        showToast('Cổng này đang xử lý lệnh trước đó.', 'error');
+        return;
+    }
+
+    if (actionPort && actionPort.smsSent && !isSpecificSmsError(actionPort.errorMsg)) {
+        showToast('Cổng này đang chờ OTP, hãy huỷ trạng thái trước khi gửi lại.', 'error');
+        return;
+    }
+
     let recipient = document.getElementById('sms-recipient-select').value;
     if (recipient === 'custom') {
         recipient = document.getElementById('sms-recipient-custom').value;
@@ -730,6 +755,7 @@ async function executeSendSms() {
     }
     
     try {
+        sendingSmsPorts.add(actionKey);
         const recipients = recipient.split(',').map(r => r.trim()).filter(r => r);
         const commandIds = [];
         
@@ -773,6 +799,8 @@ async function executeSendSms() {
         }
     } catch (error) {
         showToast('Không thể đẩy lệnh lên Firebase!', 'error');
+    } finally {
+        sendingSmsPorts.delete(actionKey);
     }
     
     closeModal('sms-modal');
