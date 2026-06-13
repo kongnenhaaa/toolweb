@@ -17,6 +17,9 @@ let sendingSmsPorts = new Set();
 
 const SMS_WAIT_TIMEOUT_MS = 120000;
 const BALANCE_COMMAND_SPACING_MS = 1200;
+const COMMAND_IN_FLIGHT_STATUSES = new Set(['queued', 'running']);
+const COMMAND_SUCCESS_STATUSES = new Set(['sent', 'done', 'success']);
+const COMMAND_FAILED_STATUSES = new Set(['failed', 'timeout', 'error']);
 
 function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
@@ -30,11 +33,83 @@ function toFirebaseKey(value) {
     return String(value || 'NONE').replace(/[.#$/\[\]]/g, '_');
 }
 
+function escapeHtml(value) {
+    return String(value ?? '').replace(/[&<>"']/g, char => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;'
+    }[char]));
+}
+
 function isSpecificSmsError(message) {
     if (!message) return false;
     return message.includes('Chọn sai đầu số')
         || message.includes('SĐT đang không yêu cầu mã')
         || message.includes('Hết tiền');
+}
+
+function normalizeText(value) {
+    return String(value || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/đ/g, 'd')
+        .replace(/Đ/g, 'D')
+        .replace(/Ä‘/g, 'd')
+        .replace(/Ä/g, 'D')
+        .toLowerCase();
+}
+
+function isActionableSmsError(message) {
+    const rawLower = String(message || '').toLowerCase();
+    const normalized = normalizeText(message);
+    if (!normalized) return false;
+
+    return isSpecificSmsError(message)
+        || normalized.includes('chon sai dau so')
+        || normalized.includes('sai dau so')
+        || normalized.includes('sai cu phap')
+        || normalized.includes('sdt dang khong yeu cau ma')
+        || normalized.includes('khong yeu cau ma')
+        || normalized.includes('khong co yeu cau ma')
+        || normalized.includes('khong thuc hien yeu cau')
+        || normalized.includes('het tien')
+        || normalized.includes('khong du tien')
+        || (rawLower.includes('khÃ') && rawLower.includes('yÃ') && rawLower.includes('mÃ£'))
+        || rawLower.includes('háº¿t tiá»n')
+        || rawLower.includes('sai Ä‘áº§u sá»‘');
+}
+
+function normalizeSmsError(message, fallback = 'Lệnh thất bại') {
+    const raw = String(message || '').trim();
+    const rawLower = raw.toLowerCase();
+    const normalized = normalizeText(raw);
+
+    if (!raw) return fallback;
+    if (normalized.includes('chon sai dau so') || normalized.includes('sai dau so') || normalized.includes('sai cu phap') || rawLower.includes('sai Ä‘áº§u sá»‘')) {
+        return 'Chọn sai đầu số';
+    }
+    if (normalized.includes('sdt dang khong yeu cau ma') || normalized.includes('khong yeu cau ma') || normalized.includes('khong co yeu cau ma') || normalized.includes('khong thuc hien yeu cau') || (rawLower.includes('khÃ') && rawLower.includes('yÃ') && rawLower.includes('mÃ£'))) {
+        return 'SĐT đang không yêu cầu mã';
+    }
+    if (normalized.includes('het tien') || normalized.includes('khong du tien') || rawLower.includes('háº¿t tiá»n')) {
+        return 'Hết tiền';
+    }
+    if (normalized.includes('qua thoi gian cho otp') || normalized.includes('timeout')) {
+        return 'Quá thời gian chờ OTP';
+    }
+    return raw;
+}
+
+function getCommandStatusText(status, type = 'sms') {
+    if (status === 'queued') return 'Đang xếp hàng';
+    if (status === 'running') return type === 'balance' ? 'Đang kiểm tra số dư' : 'Đang gửi SMS';
+    if (status === 'sent') return 'Đã gửi SMS';
+    if (status === 'done' || status === 'success') return type === 'balance' ? 'Đã kiểm tra số dư' : 'Hoàn tất';
+    if (status === 'failed') return 'Lỗi';
+    if (status === 'timeout') return 'Quá thời gian';
+    return '';
 }
 
 async function createCommand({ machineId, portId, recipient, content, type = 'sms' }) {
@@ -55,12 +130,14 @@ async function createCommand({ machineId, portId, recipient, content, type = 'sm
 }
 
 function applyCommandResult(commandId, result) {
-    if (!result || !result.machineId || !result.portId) return;
-    if (result.updatedAt && getServerNow() - result.updatedAt > 10 * 60 * 1000) return;
+    if (!result || !result.machineId || !result.portId) return false;
+    if (result.updatedAt && getServerNow() - result.updatedAt > 10 * 60 * 1000) return false;
 
     const stateKey = `${result.machineId}_${result.portId}`;
     const webState = globalWebStates[stateKey] || {};
-    if (webState.commandId && webState.commandId !== commandId) return;
+    const port = state.ports.find(p => p.id === result.portId && p.machineId === result.machineId);
+    if (webState.commandId && webState.commandId !== commandId) return false;
+    if (!webState.commandId && port?.commandId !== commandId) return false;
 
     const status = result.status || 'unknown';
     const type = result.type || (result.recipient === 'USSD' ? 'balance' : 'sms');
@@ -69,17 +146,16 @@ function applyCommandResult(commandId, result) {
         pendingBalanceChecks.delete(stateKey);
     }
 
-    const port = state.ports.find(p => p.id === result.portId && p.machineId === result.machineId);
     if (port) {
         port.commandId = commandId;
         port.commandStatus = status;
     }
 
-    if (status === 'failed') {
+    if (COMMAND_FAILED_STATUSES.has(status)) {
         const currentError = webState.errorMsg || null;
-        const nextError = isSpecificSmsError(currentError)
-            ? currentError
-            : (result.error || 'Lệnh thất bại');
+        const nextError = isActionableSmsError(currentError)
+            ? normalizeSmsError(currentError)
+            : normalizeSmsError(result.error);
 
         pendingBalanceChecks.delete(stateKey);
         db.ref(`web_states/machines/${result.machineId}/ports/${result.portId}`).update({
@@ -93,23 +169,30 @@ function applyCommandResult(commandId, result) {
             port.smsSent = false;
             port.errorMsg = nextError;
         }
-    } else if (status === 'sent' || status === 'done') {
+    } else if (COMMAND_SUCCESS_STATUSES.has(status)) {
         const currentError = webState.errorMsg || null;
         const updatePayload = {
             commandId,
             commandStatus: status
         };
-        if (!isSpecificSmsError(currentError)) {
+        if (type !== 'sms') {
+            updatePayload.commandStatus = null;
+        }
+        if (!isActionableSmsError(currentError)) {
             updatePayload.errorMsg = null;
         }
 
         db.ref(`web_states/machines/${result.machineId}/ports/${result.portId}`).update(updatePayload);
         if (port) {
-            port.errorMsg = isSpecificSmsError(currentError) ? currentError : null;
+            port.errorMsg = isActionableSmsError(currentError) ? normalizeSmsError(currentError) : null;
+            if (type !== 'sms') {
+                port.commandStatus = null;
+            }
         }
     }
 
     renderPorts();
+    return true;
 }
 
 
@@ -268,13 +351,13 @@ function applyWebStates() {
         
         let shouldHide = false;
         let isSmsSent = webState.smsSent || false;
-        let errorMsg = webState.errorMsg || null;
+        let errorMsg = webState.errorMsg ? normalizeSmsError(webState.errorMsg) : null;
         const smsSentTime = webState.smsSentTime || port.smsSentTime || null;
 
         if (isSmsSent && smsSentTime && !port.otp && !errorMsg) {
             const elapsed = getServerNow() - smsSentTime;
             if (elapsed > SMS_WAIT_TIMEOUT_MS) {
-                errorMsg = 'Quá thời gian chờ OTP';
+                errorMsg = normalizeSmsError('Quá thời gian chờ OTP');
                 isSmsSent = false;
                 db.ref(`web_states/machines/${port.machineId}/ports/${port.id}`).update({
                     smsSent: false,
@@ -409,7 +492,7 @@ function renderPorts() {
         // Render Machine Header
         const header = document.createElement('div');
         header.className = 'machine-header';
-        header.innerHTML = `<i data-lucide="server"></i> Máy tính: <strong>${machineId}</strong> <span class="badge">${groupedPorts[machineId].length} cổng</span>`;
+        header.innerHTML = `<i data-lucide="server"></i> Máy tính: <strong>${escapeHtml(machineId)}</strong> <span class="badge">${groupedPorts[machineId].length} cổng</span>`;
         container.appendChild(header);
 
         // Render từng cổng của máy này
@@ -425,14 +508,20 @@ function renderPorts() {
                 '<div class="status-indicator online"></div>' : 
                 '<div class="status-indicator" style="background: red;"></div>';
 
+            const isChecking = pendingBalanceChecks.has(`${port.machineId}_${port.id}`);
+            const commandText = getCommandStatusText(port.commandStatus, port.commandStatus === 'running' && isChecking ? 'balance' : 'sms');
+            const isCommandBusy = COMMAND_IN_FLIGHT_STATUSES.has(port.commandStatus);
+
             let otpContent = port.smsSent ? 
                 `<span style="color: #f39c12">Đang chờ mã... <span class="wait-timer" data-port="${port.id}" data-machine="${port.machineId}"></span></span>` : 
                 '<span style="color: var(--text-muted)">Chưa gửi tin nhắn</span>';
+            if (!port.smsSent && commandText) {
+                otpContent = `<span style="color: var(--warning); font-weight: 600;">${escapeHtml(commandText)}</span>`;
+            }
 
-            const isChecking = pendingBalanceChecks.has(`${port.machineId}_${port.id}`);
             let actionButtons = `
-                <button class="btn btn-primary" onclick="openSmsModal('${port.id}', '${port.machineId}')" title="Gửi SMS Lấy OTP">
-                    <i data-lucide="send"></i> Gửi SMS
+                <button class="btn btn-primary" onclick="openSmsModal('${port.id}', '${port.machineId}')" title="Gửi SMS Lấy OTP" ${isCommandBusy ? 'disabled' : ''}>
+                    <i data-lucide="send"></i> ${isCommandBusy ? escapeHtml(commandText || 'Đang xử lý') : 'Gửi SMS'}
                 </button>
                 <button class="btn btn-outline${isChecking ? ' btn-loading' : ''}" id="btn-balance-${port.machineId}-${port.id}" onclick="checkBalance('${port.id}', '${port.machineId}')" title="Kiểm tra số dư" ${isChecking ? 'disabled' : ''}>
                     ${isChecking ? '<span class="spinner"></span> Đang kiểm tra...' : '<i data-lucide="dollar-sign"></i> Kiểm tra số dư'}
@@ -440,9 +529,9 @@ function renderPorts() {
             `;
 
             if (port.errorMsg) {
-                otpContent = `<span style="color: var(--danger); font-weight: 500;"><i data-lucide="alert-triangle" style="width: 14px; height: 14px; display: inline; margin-bottom: -2px;"></i> ${port.errorMsg}</span>`;
+                otpContent = `<span style="color: var(--danger); font-weight: 500;"><i data-lucide="alert-triangle" style="width: 14px; height: 14px; display: inline; margin-bottom: -2px;"></i> ${escapeHtml(normalizeSmsError(port.errorMsg))}</span>`;
             } else if (port.otp) {
-                otpContent = `<span class="otp-badge">${port.otp}</span>`;
+                otpContent = `<span class="otp-badge">${escapeHtml(port.otp)}</span>`;
                 actionButtons = `
                     <button class="btn btn-success" onclick="markAsUsed('${port.id}', '${port.machineId}')">
                         <i data-lucide="check-circle"></i> Đã dùng
@@ -462,9 +551,9 @@ function renderPorts() {
 
             row.innerHTML = `
                 <div class="col-status">${statusDot}</div>
-                <div class="col-port">${port.id}</div>
-                <div class="col-phone">${port.phone ? port.phone.replace(/(\d{4})(\d{3})(\d{3})/, '$1 $2 $3') : '<span style="color:gray; font-style:italic">Trống</span>'}</div>
-                <div class="col-tkc">${port.balance || 'N/A'}</div>
+                <div class="col-port">${escapeHtml(port.id)}</div>
+                <div class="col-phone">${port.phone ? escapeHtml(String(port.phone).replace(/(\d{4})(\d{3})(\d{3})/, '$1 $2 $3')) : '<span style="color:gray; font-style:italic">Trống</span>'}</div>
+                <div class="col-tkc">${escapeHtml(port.balance || 'N/A')}</div>
                 <div class="col-otp">${otpContent}</div>
                 <div class="col-actions">
                     ${actionButtons}
@@ -557,10 +646,10 @@ function renderHistory() {
         row.className = 'grid-row';
 
         row.innerHTML = `
-            <div class="col-port">${item.id} <br><span style="font-size: 11px; color: #aaa;">${item.machineId || ''}</span></div>
-            <div class="col-phone">${item.phone ? item.phone.replace(/(\d{4})(\d{3})(\d{3})/, '$1 $2 $3') : '<span style="color:gray; font-style:italic">Trống</span>'}</div>
-            <div class="col-otp"><span style="color: var(--success); font-weight: bold;">${item.otp}</span></div>
-            <div class="col-time">${item.usedTime}</div>
+            <div class="col-port">${escapeHtml(item.id)} <br><span style="font-size: 11px; color: #aaa;">${escapeHtml(item.machineId || '')}</span></div>
+            <div class="col-phone">${item.phone ? escapeHtml(String(item.phone).replace(/(\d{4})(\d{3})(\d{3})/, '$1 $2 $3')) : '<span style="color:gray; font-style:italic">Trống</span>'}</div>
+            <div class="col-otp"><span style="color: var(--success); font-weight: bold;">${escapeHtml(item.otp)}</span></div>
+            <div class="col-time">${escapeHtml(item.usedTime)}</div>
             <div class="col-actions">
                 <button class="btn btn-primary" onclick="restoreFromHistory('${item.id}', '${item.machineId}', '${item.usedTime}', '${item.fbKey}')" title="Khôi phục trạng thái hoạt động">
                     <i data-lucide="rotate-ccw"></i> Khôi phục
@@ -613,9 +702,9 @@ function exportHistoryToExcel() {
     `;
     
     state.history.forEach(item => {
-        const phone = item.phone || '';
-        const otp = item.otp || '';
-        const time = item.usedTime || '';
+        const phone = escapeHtml(item.phone || '');
+        const otp = escapeHtml(item.otp || '');
+        const time = escapeHtml(item.usedTime || '');
         
         html += `
                 <tr>
@@ -719,12 +808,12 @@ async function executeSendSms() {
         return;
     }
 
-    if (webState.commandStatus === 'queued' || webState.commandStatus === 'running') {
+    if (COMMAND_IN_FLIGHT_STATUSES.has(webState.commandStatus)) {
         showToast('Cổng này đang xử lý lệnh trước đó.', 'error');
         return;
     }
 
-    if (actionPort && actionPort.smsSent && !isSpecificSmsError(actionPort.errorMsg)) {
+    if (actionPort && actionPort.smsSent && !isActionableSmsError(actionPort.errorMsg)) {
         showToast('Cổng này đang chờ OTP, hãy huỷ trạng thái trước khi gửi lại.', 'error');
         return;
     }
@@ -775,6 +864,8 @@ async function executeSendSms() {
             // Xoá OTP cũ hiển thị trên trình duyệt để chuyển sang trạng thái "Đang chờ mã..."
             port.otp = null;
             port.errorMsg = null;
+            port.commandId = commandIds[commandIds.length - 1] || null;
+            port.commandStatus = 'queued';
             
             db.ref(`machines/${actionMachineId}/ports/${actionPortId}/otp`).remove();
             
@@ -831,6 +922,11 @@ window.checkBalance = async function(portId, machineId) {
             commandStatus: 'queued',
             errorMsg: null
         });
+        const port = state.ports.find(p => p.id === portId && p.machineId === machineId);
+        if (port) {
+            port.commandId = commandId;
+            port.commandStatus = 'queued';
+        }
         showToast(`Đã gửi lệnh kiểm tra số dư cho cổng ${portId} (${machineId})`);
 
         // Tự tắt spinner sau 45s nếu không nhận được kết quả
@@ -852,6 +948,11 @@ window.checkBalance = async function(portId, machineId) {
 }
 
 window.cancelSmsWait = function(portId, machineId) {
+    const stateKey = `${machineId}_${portId}`;
+    const webState = globalWebStates[stateKey] || {};
+    if (webState.commandId && COMMAND_IN_FLIGHT_STATUSES.has(webState.commandStatus)) {
+        db.ref(`commands/${webState.commandId}`).remove();
+    }
     db.ref(`web_states/machines/${machineId}/ports/${portId}`).remove();
     db.ref(`machines/${machineId}/ports/${portId}/otp`).remove();
     
@@ -860,6 +961,9 @@ window.cancelSmsWait = function(portId, machineId) {
     if (port) {
         if (port.otp) port.otp = null;
         port.smsSent = false;
+        port.commandId = null;
+        port.commandStatus = null;
+        port.errorMsg = null;
         renderPorts();
     }
     
@@ -875,10 +979,17 @@ window.cancelAllSmsWait = function() {
 
     showToast(`Đang huỷ trạng thái chờ cho ${visiblePorts.length} cổng...`);
     visiblePorts.forEach(port => {
+        const webState = globalWebStates[`${port.machineId}_${port.id}`] || {};
+        if (webState.commandId && COMMAND_IN_FLIGHT_STATUSES.has(webState.commandStatus)) {
+            db.ref(`commands/${webState.commandId}`).remove();
+        }
         db.ref(`web_states/machines/${port.machineId}/ports/${port.id}`).remove();
         db.ref(`machines/${port.machineId}/ports/${port.id}/otp`).remove();
         if (port.otp) port.otp = null;
         port.smsSent = false;
+        port.commandId = null;
+        port.commandStatus = null;
+        port.errorMsg = null;
     });
     renderPorts();
     showToast(`Đã huỷ trạng thái cho ${visiblePorts.length} cổng`);
@@ -1049,7 +1160,7 @@ function showToast(message, type = 'success') {
     
     toast.innerHTML = `
         <i data-lucide="${icon}" style="color: ${color}"></i>
-        <span>${message}</span>
+        <span>${escapeHtml(message)}</span>
     `;
     
     container.appendChild(toast);
@@ -1133,8 +1244,9 @@ window.onload = () => {
         Object.entries(commandResults).forEach(([commandId, result]) => {
             const signature = `${result.status || ''}_${result.updatedAt || ''}_${result.error || ''}`;
             if (appliedCommandResults[commandId] === signature) return;
-            appliedCommandResults[commandId] = signature;
-            applyCommandResult(commandId, result);
+            if (applyCommandResult(commandId, result)) {
+                appliedCommandResults[commandId] = signature;
+            }
         });
     });
 
