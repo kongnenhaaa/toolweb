@@ -76,8 +76,25 @@
             </header>
 
             <div class="content-area" id="active-view">
+                <div class="ops-dashboard" id="ops-dashboard"></div>
+                <div class="ops-panels">
+                    <section class="ops-panel">
+                        <div class="ops-panel-header">
+                            <h2><i data-lucide="alert-triangle"></i> Lỗi cần xử lý</h2>
+                            <span class="panel-count" id="error-panel-count">0</span>
+                        </div>
+                        <div id="error-panel-list" class="ops-list"></div>
+                    </section>
+                    <section class="ops-panel">
+                        <div class="ops-panel-header">
+                            <h2><i data-lucide="activity"></i> Command Monitor</h2>
+                            <span class="panel-count" id="command-panel-count">0</span>
+                        </div>
+                        <div id="command-monitor-list" class="ops-list command-list"></div>
+                    </section>
+                </div>
                 <div class="filter-bar" id="port-filters"
-                    style="display: flex; gap: 16px; margin-bottom: 16px; align-items: center; background: rgba(255,255,255,0.02); padding: 12px 16px; border-radius: 8px; border: 1px solid var(--border-color);">
+                    style="display: flex; gap: 16px; margin-bottom: 16px; align-items: center; flex-wrap: wrap; background: rgba(255,255,255,0.02); padding: 12px 16px; border-radius: 8px; border: 1px solid var(--border-color);">
                     <div style="font-weight: 500; font-size: 14px; display: flex; align-items: center; gap: 8px;">
                         <i data-lucide="users"></i> Chia nhóm:
                     </div>
@@ -98,10 +115,40 @@
                     </div>
                     <div style="width: 1px; height: 24px; background: var(--border-color); margin: 0 8px;"></div>
                     <div class="form-group" style="margin-bottom: 0; display: flex; align-items: center; gap: 8px;">
+                        <label style="font-size: 13px; color: var(--text-muted); margin-bottom: 0;" for="filter-machine">Máy:</label>
+                        <select id="filter-machine" style="width: 140px; padding: 6px 12px; height: auto;" onchange="renderPorts();">
+                            <option value="">Tất cả</option>
+                        </select>
+                    </div>
+                    <div class="form-group" style="margin-bottom: 0; display: flex; align-items: center; gap: 8px;">
+                        <label style="font-size: 13px; color: var(--text-muted); margin-bottom: 0;" for="filter-status">Trạng thái:</label>
+                        <select id="filter-status" style="width: 140px; padding: 6px 12px; height: auto;" onchange="renderPorts();">
+                            <option value="">Tất cả</option>
+                            <option value="online">Online</option>
+                            <option value="offline">Offline</option>
+                            <option value="waiting">Chờ OTP</option>
+                            <option value="otp">Có OTP</option>
+                            <option value="error">Có lỗi</option>
+                            <option value="busy">Đang chạy</option>
+                        </select>
+                    </div>
+                    <div class="form-group" style="margin-bottom: 0; display: flex; align-items: center; gap: 8px;">
+                        <label style="font-size: 13px; color: var(--text-muted); margin-bottom: 0;" for="filter-network">Nhà mạng:</label>
+                        <select id="filter-network" style="width: 130px; padding: 6px 12px; height: auto;" onchange="renderPorts();">
+                            <option value="">Tất cả</option>
+                        </select>
+                    </div>
+                    <div class="form-group" style="margin-bottom: 0; display: flex; align-items: center; gap: 8px;">
                         <input type="checkbox" id="filter-balance-5k" onchange="renderPorts();"
                             style="cursor: pointer; width: 16px; height: 16px;">
                         <label style="font-size: 13px; color: var(--text-muted); margin-bottom: 0; cursor: pointer;"
                             for="filter-balance-5k">Chỉ SĐT có số dư &ge; 5000đ</label>
+                    </div>
+                    <div class="form-group" style="margin-bottom: 0; display: flex; align-items: center; gap: 8px;">
+                        <input type="checkbox" id="filter-error-heavy" onchange="renderPorts();"
+                            style="cursor: pointer; width: 16px; height: 16px;">
+                        <label style="font-size: 13px; color: var(--text-muted); margin-bottom: 0; cursor: pointer;"
+                            for="filter-error-heavy">SIM lỗi nhiều</label>
                     </div>
                 </div>
 

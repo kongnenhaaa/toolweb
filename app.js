@@ -45,6 +45,169 @@ function escapeHtml(value) {
     }[char]));
 }
 
+function parseBalanceValue(balance) {
+    if (!balance) return 0;
+    return parseInt(String(balance).replace(/[^\d]/g, ''), 10) || 0;
+}
+
+function getPortUiStatus(port) {
+    if (port.errorMsg) return 'error';
+    if (COMMAND_IN_FLIGHT_STATUSES.has(port.commandStatus)) return 'busy';
+    if (port.otp) return 'otp';
+    if (port.smsSent) return 'waiting';
+    return port.status === 'online' ? 'online' : 'offline';
+}
+
+function getPortUiStatusLabel(status) {
+    return {
+        online: 'Online',
+        offline: 'Offline',
+        waiting: 'Chờ OTP',
+        otp: 'Có OTP',
+        error: 'Lỗi',
+        busy: 'Đang chạy'
+    }[status] || status;
+}
+
+function updateSelectOptions(selectId, values) {
+    const select = document.getElementById(selectId);
+    if (!select) return;
+
+    const current = select.value;
+    const firstLabel = select.options[0]?.textContent || 'Tất cả';
+    select.innerHTML = `<option value="">${firstLabel}</option>`;
+
+    [...new Set(values.filter(Boolean))].sort().forEach(value => {
+        const option = document.createElement('option');
+        option.value = value;
+        option.textContent = value;
+        select.appendChild(option);
+    });
+
+    if ([...select.options].some(option => option.value === current)) {
+        select.value = current;
+    }
+}
+
+function updateAdvancedFilterOptions() {
+    updateSelectOptions('filter-machine', state.ports.filter(p => !p.isTest).map(p => p.machineId));
+    updateSelectOptions('filter-network', state.ports.filter(p => !p.isTest).map(p => p.networkProvider || p.network || ''));
+}
+
+function renderOpsDashboard() {
+    const dashboard = document.getElementById('ops-dashboard');
+    if (!dashboard) return;
+
+    const ports = state.ports.filter(p => !p.isTest && !p.hidden);
+    const online = ports.filter(p => p.status === 'online').length;
+    const offline = ports.length - online;
+    const waitingOtp = ports.filter(p => p.smsSent && !p.otp && !p.errorMsg).length;
+    const smsErrors = ports.filter(p => p.errorMsg || (p.smsErrorCount || 0) > 0 || (p.timeoutCount || 0) > 0).length;
+    const runningCommands = ports.filter(p => COMMAND_IN_FLIGHT_STATUSES.has(p.commandStatus)).length;
+    const now = getServerNow();
+    const lostMachines = Object.entries(lastSyncByMachine).filter(([, sync]) => now - sync > 15000).length;
+
+    const cards = [
+        ['server', 'Cổng online/offline', `${online}/${offline}`, online ? 'success' : 'muted'],
+        ['clock', 'SIM chờ OTP', waitingOtp, waitingOtp ? 'warning' : 'muted'],
+        ['alert-triangle', 'Cổng có lỗi SMS', smsErrors, smsErrors ? 'danger' : 'muted'],
+        ['activity', 'Command đang chạy', runningCommands, runningCommands ? 'warning' : 'muted'],
+        ['wifi-off', 'Máy mất kết nối', lostMachines, lostMachines ? 'danger' : 'muted']
+    ];
+
+    dashboard.innerHTML = cards.map(([icon, label, value, tone]) => `
+        <div class="metric-card ${tone}">
+            <div class="metric-label"><i data-lucide="${icon}"></i>${label}</div>
+            <div class="metric-value">${escapeHtml(value)}</div>
+        </div>
+    `).join('');
+}
+
+function renderErrorPanel() {
+    const list = document.getElementById('error-panel-list');
+    const count = document.getElementById('error-panel-count');
+    if (!list || !count) return;
+
+    const ports = state.ports
+        .filter(p => !p.isTest && !p.hidden)
+        .filter(p => p.errorMsg || (p.timeoutCount || 0) > 0 || (p.smsErrorCount || 0) > 0 || String(p.status).toLowerCase() !== 'online')
+        .sort((a, b) => ((b.timeoutCount || 0) + (b.smsErrorCount || 0)) - ((a.timeoutCount || 0) + (a.smsErrorCount || 0)))
+        .slice(0, 8);
+
+    count.textContent = ports.length;
+    if (!ports.length) {
+        list.innerHTML = '<div class="ops-empty">Không có lỗi cần xử lý.</div>';
+        return;
+    }
+
+    list.innerHTML = ports.map(port => {
+        const err = normalizeSmsError(port.errorMsg || port.lastError || (port.status === 'online' ? 'Có dấu hiệu lỗi cần theo dõi' : 'Cổng offline'));
+        const totalErrors = (port.timeoutCount || 0) + (port.smsErrorCount || 0);
+        return `
+            <div class="ops-item">
+                <div>
+                    <div class="ops-title">
+                        <span class="status-pill failed">${escapeHtml(port.id)}</span>
+                        <span>${escapeHtml(port.machineId || 'UNKNOWN')}</span>
+                    </div>
+                    <div class="ops-sub">${escapeHtml(err)} · TO:${port.timeoutCount || 0} SMS:${port.smsErrorCount || 0} RC:${port.reconnectCount || 0}</div>
+                </div>
+                <div class="ops-actions">
+                    <button class="btn btn-outline" onclick="cancelSmsWait('${port.id}', '${port.machineId}')">Hủy</button>
+                    <button class="btn btn-primary" onclick="openSmsModal('${port.id}', '${port.machineId}')">Gửi lại</button>
+                    <button class="btn btn-secondary" onclick="checkBalance('${port.id}', '${port.machineId}')">TKC</button>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+function renderCommandMonitor() {
+    const list = document.getElementById('command-monitor-list');
+    const count = document.getElementById('command-panel-count');
+    if (!list || !count) return;
+
+    const rows = Object.entries(commandResults || {})
+        .map(([id, result]) => ({ id, ...result }))
+        .filter(result => result.machineId && result.portId)
+        .sort((a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0))
+        .slice(0, 12);
+
+    const activeCount = rows.filter(r => COMMAND_IN_FLIGHT_STATUSES.has(r.status)).length;
+    count.textContent = activeCount || rows.length;
+
+    if (!rows.length) {
+        list.innerHTML = '<div class="ops-empty">Chưa có command nào.</div>';
+        return;
+    }
+
+    list.innerHTML = rows.map(result => {
+        const status = result.status || 'unknown';
+        const time = result.updatedAt ? new Date(result.updatedAt).toLocaleTimeString('vi-VN') : '--:--';
+        const content = result.type === 'balance' ? 'Kiểm tra TKC' : (result.content || '');
+        return `
+            <div class="ops-item">
+                <div>
+                    <div class="ops-title">${escapeHtml(result.portId)} <span class="status-pill ${escapeHtml(status)}">${escapeHtml(getCommandStatusText(status, result.type) || status)}</span></div>
+                    <div class="ops-sub">${escapeHtml(result.machineId)} · ${escapeHtml(result.recipient || '')}</div>
+                </div>
+                <div class="ops-sub">${escapeHtml(content)}</div>
+                <div class="ops-sub">${escapeHtml(time)}</div>
+            </div>
+        `;
+    }).join('');
+}
+
+function renderOperationalPanels() {
+    updateAdvancedFilterOptions();
+    renderOpsDashboard();
+    renderErrorPanel();
+    renderCommandMonitor();
+    if (window.lucide) {
+        lucide.createIcons();
+    }
+}
+
 function isSpecificSmsError(message) {
     if (!message) return false;
     return message.includes('Chọn sai đầu số')
@@ -451,6 +614,7 @@ function applyWebStates() {
 // Render Ports
 function renderPorts() {
     const container = document.getElementById('ports-container');
+    renderOperationalPanels();
     container.innerHTML = '';
 
     // Sort ALL ports by COM number to guarantee stable order for division
@@ -490,11 +654,28 @@ function renderPorts() {
     if (filter5kChecked) {
         portsToRender = portsToRender.filter(p => {
             if (!p.balance) return false;
-            // Parse số từ chuỗi ví dụ: "TKC 15000 VND" -> 15000
-            const numStr = p.balance.replace(/[^\d]/g, '');
-            const balanceNum = parseInt(numStr) || 0;
-            return balanceNum >= 5000;
+            return parseBalanceValue(p.balance) >= 5000;
         });
+    }
+
+    const selectedMachine = document.getElementById('filter-machine')?.value || '';
+    if (selectedMachine) {
+        portsToRender = portsToRender.filter(p => p.machineId === selectedMachine);
+    }
+
+    const selectedStatus = document.getElementById('filter-status')?.value || '';
+    if (selectedStatus) {
+        portsToRender = portsToRender.filter(p => getPortUiStatus(p) === selectedStatus);
+    }
+
+    const selectedNetwork = document.getElementById('filter-network')?.value || '';
+    if (selectedNetwork) {
+        portsToRender = portsToRender.filter(p => (p.networkProvider || p.network || '') === selectedNetwork);
+    }
+
+    const onlyHeavyErrors = document.getElementById('filter-error-heavy')?.checked;
+    if (onlyHeavyErrors) {
+        portsToRender = portsToRender.filter(p => ((p.timeoutCount || 0) + (p.smsErrorCount || 0) + (p.reconnectCount || 0)) >= 2);
     }
 
     if (portsToRender.length === 0) {
@@ -526,9 +707,8 @@ function renderPorts() {
             }
             row.id = `row-${port.machineId}-${port.id}`;
 
-            const statusDot = port.status === 'online' ? 
-                '<div class="status-indicator online"></div>' : 
-                '<div class="status-indicator" style="background: red;"></div>';
+            const uiStatus = getPortUiStatus(port);
+            const statusDot = `<span class="status-pill ${uiStatus}">${escapeHtml(getPortUiStatusLabel(uiStatus))}</span>`;
 
             const isChecking = pendingBalanceChecks.has(`${port.machineId}_${port.id}`);
             const commandText = getCommandStatusText(port.commandStatus, port.commandStatus === 'running' && isChecking ? 'balance' : 'sms');
@@ -915,17 +1095,18 @@ async function executeSendSms() {
             port.commandIds = commandIds;
             port.commandStatus = 'queued';
             
-            db.ref(`machines/${actionMachineId}/ports/${actionPortId}/otp`).remove();
-            
-            db.ref(`web_states/machines/${actionMachineId}/ports/${actionPortId}`).update({
-                smsSent: true,
-                smsSentTime: firebase.database.ServerValue.TIMESTAMP,
-                commandId: commandIds[commandIds.length - 1] || null,
-                commandIds,
-                commandStatus: 'queued',
-                errorMsg: null,
-                phone: port.phone || 'NONE'
-            });
+            await Promise.all([
+                db.ref(`machines/${actionMachineId}/ports/${actionPortId}/otp`).remove(),
+                db.ref(`web_states/machines/${actionMachineId}/ports/${actionPortId}`).update({
+                    smsSent: true,
+                    smsSentTime: firebase.database.ServerValue.TIMESTAMP,
+                    commandId: commandIds[commandIds.length - 1] || null,
+                    commandIds,
+                    commandStatus: 'queued',
+                    errorMsg: null,
+                    phone: port.phone || 'NONE'
+                })
+            ]);
         } else if (port) {
             port.otp = null;
             port.smsSent = true;
@@ -1321,6 +1502,7 @@ window.onload = () => {
                 appliedCommandResults[commandId] = signature;
             }
         }
+        renderOperationalPanels();
     });
 
     fetchPorts();
