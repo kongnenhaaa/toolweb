@@ -89,6 +89,88 @@ function updateSelectOptions(selectId, values) {
     }
 }
 
+function getStoredOrder(storageKey) {
+    try {
+        const value = JSON.parse(localStorage.getItem(storageKey) || '[]');
+        return Array.isArray(value) ? value : [];
+    } catch {
+        return [];
+    }
+}
+
+function saveStoredOrder(storageKey, container) {
+    const order = Array.from(container.children)
+        .map(child => child.dataset.dragKey)
+        .filter(Boolean);
+    localStorage.setItem(storageKey, JSON.stringify(order));
+}
+
+function sortByStoredOrder(items, storageKey) {
+    const order = getStoredOrder(storageKey);
+    if (!order.length) return items;
+    return [...items].sort((a, b) => {
+        const aIndex = order.indexOf(a.key);
+        const bIndex = order.indexOf(b.key);
+        return (aIndex === -1 ? 999 : aIndex) - (bIndex === -1 ? 999 : bIndex);
+    });
+}
+
+function applyStoredDomOrder(container, storageKey) {
+    const order = getStoredOrder(storageKey);
+    if (!order.length) return;
+
+    order.forEach(key => {
+        const child = Array.from(container.children).find(el => el.dataset.dragKey === key);
+        if (child) container.appendChild(child);
+    });
+}
+
+function enableDragSort(container, storageKey) {
+    if (!container || container.dataset.dragReady === 'true') return;
+    container.dataset.dragReady = 'true';
+    applyStoredDomOrder(container, storageKey);
+
+    container.addEventListener('dragstart', event => {
+        const item = event.target.closest('[data-drag-key]');
+        if (!item || item.parentElement !== container) return;
+        event.dataTransfer.effectAllowed = 'move';
+        event.dataTransfer.setData('text/plain', item.dataset.dragKey || '');
+        item.classList.add('dragging-card');
+    });
+
+    container.addEventListener('dragend', event => {
+        const item = event.target.closest('[data-drag-key]');
+        if (item) item.classList.remove('dragging-card');
+        container.querySelectorAll('.drag-over-card').forEach(el => el.classList.remove('drag-over-card'));
+        saveStoredOrder(storageKey, container);
+    });
+
+    container.addEventListener('dragover', event => {
+        const overItem = event.target.closest('[data-drag-key]');
+        if (!overItem || overItem.parentElement !== container) return;
+        event.preventDefault();
+        overItem.classList.add('drag-over-card');
+    });
+
+    container.addEventListener('dragleave', event => {
+        const overItem = event.target.closest('[data-drag-key]');
+        if (overItem) overItem.classList.remove('drag-over-card');
+    });
+
+    container.addEventListener('drop', event => {
+        const target = event.target.closest('[data-drag-key]');
+        const dragging = container.querySelector('.dragging-card');
+        if (!target || !dragging || target === dragging || target.parentElement !== container) return;
+        event.preventDefault();
+
+        const rect = target.getBoundingClientRect();
+        const insertAfter = event.clientY > rect.top + rect.height / 2 || event.clientX > rect.left + rect.width / 2;
+        container.insertBefore(dragging, insertAfter ? target.nextSibling : target);
+        target.classList.remove('drag-over-card');
+        saveStoredOrder(storageKey, container);
+    });
+}
+
 function updateAdvancedFilterOptions() {
     updateSelectOptions('filter-machine', state.ports.filter(p => !p.isTest).map(p => p.machineId));
     updateSelectOptions('filter-network', state.ports.filter(p => !p.isTest).map(p => p.networkProvider || p.network || ''));
@@ -107,20 +189,21 @@ function renderOpsDashboard() {
     const now = getServerNow();
     const lostMachines = Object.entries(lastSyncByMachine).filter(([, sync]) => now - sync > 15000).length;
 
-    const cards = [
-        ['server', 'Cổng online/offline', `${online}/${offline}`, online ? 'success' : 'muted'],
-        ['clock', 'SIM chờ OTP', waitingOtp, waitingOtp ? 'warning' : 'muted'],
-        ['alert-triangle', 'Cổng có lỗi SMS', smsErrors, smsErrors ? 'danger' : 'muted'],
-        ['activity', 'Command đang chạy', runningCommands, runningCommands ? 'warning' : 'muted'],
-        ['wifi-off', 'Máy mất kết nối', lostMachines, lostMachines ? 'danger' : 'muted']
-    ];
+    const cards = sortByStoredOrder([
+        { key: 'ports', icon: 'server', label: 'Cổng online/offline', value: `${online}/${offline}`, tone: online ? 'success' : 'muted' },
+        { key: 'waiting-otp', icon: 'clock', label: 'SIM chờ OTP', value: waitingOtp, tone: waitingOtp ? 'warning' : 'muted' },
+        { key: 'sms-errors', icon: 'alert-triangle', label: 'Cổng có lỗi SMS', value: smsErrors, tone: smsErrors ? 'danger' : 'muted' },
+        { key: 'running-commands', icon: 'activity', label: 'Command đang chạy', value: runningCommands, tone: runningCommands ? 'warning' : 'muted' },
+        { key: 'lost-machines', icon: 'wifi-off', label: 'Máy mất kết nối', value: lostMachines, tone: lostMachines ? 'danger' : 'muted' }
+    ], 'ops_dashboard_order');
 
-    dashboard.innerHTML = cards.map(([icon, label, value, tone]) => `
-        <div class="metric-card ${tone}">
+    dashboard.innerHTML = cards.map(({ key, icon, label, value, tone }) => `
+        <div class="metric-card ${tone}" data-drag-key="${key}" draggable="true" title="Kéo để sắp xếp">
             <div class="metric-label"><i data-lucide="${icon}"></i>${label}</div>
             <div class="metric-value">${escapeHtml(value)}</div>
         </div>
     `).join('');
+    enableDragSort(dashboard, 'ops_dashboard_order');
 }
 
 function renderErrorPanel() {
@@ -200,6 +283,7 @@ function renderCommandMonitor() {
 
 function renderOperationalPanels() {
     updateAdvancedFilterOptions();
+    enableDragSort(document.querySelector('.ops-panels'), 'ops_panel_order');
     renderOpsDashboard();
     renderErrorPanel();
     renderCommandMonitor();

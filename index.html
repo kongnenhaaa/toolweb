@@ -78,14 +78,14 @@
             <div class="content-area" id="active-view">
                 <div class="ops-dashboard" id="ops-dashboard"></div>
                 <div class="ops-panels">
-                    <section class="ops-panel">
+                    <section class="ops-panel" id="error-ops-panel" data-drag-key="errors" draggable="true">
                         <div class="ops-panel-header">
                             <h2><i data-lucide="alert-triangle"></i> Lỗi cần xử lý</h2>
                             <span class="panel-count" id="error-panel-count">0</span>
                         </div>
                         <div id="error-panel-list" class="ops-list"></div>
                     </section>
-                    <section class="ops-panel">
+                    <section class="ops-panel" id="command-ops-panel" data-drag-key="commands" draggable="true">
                         <div class="ops-panel-header">
                             <h2><i data-lucide="activity"></i> Command Monitor</h2>
                             <span class="panel-count" id="command-panel-count">0</span>

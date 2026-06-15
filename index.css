@@ -24,7 +24,15 @@ body {
     background-color: var(--bg-dark);
     color: var(--text-main);
     min-height: 100vh;
-    overflow: hidden;
+    overflow-y: auto;
+    overflow-x: hidden;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+}
+
+html::-webkit-scrollbar,
+body::-webkit-scrollbar {
+    display: none;
 }
 
 /* Glassmorphism Utilities */
@@ -37,8 +45,8 @@ body {
 
 .app-container {
     display: flex;
-    height: 100dvh; /* Dùng dvh thay vì vh để tương thích thanh địa chỉ mobile */
-    overflow: hidden;
+    min-height: 100dvh;
+    overflow: visible;
 }
 
 /* Sidebar */
@@ -132,6 +140,7 @@ body {
     border-radius: 8px;
     padding: 12px 14px;
     min-height: 78px;
+    cursor: grab;
 }
 
 .metric-card .metric-label {
@@ -168,6 +177,22 @@ body {
     border: 1px solid var(--border-color);
     border-radius: 8px;
     overflow: hidden;
+    cursor: grab;
+}
+
+.metric-card:active,
+.ops-panel:active {
+    cursor: grabbing;
+}
+
+.dragging-card {
+    opacity: 0.45;
+    transform: scale(0.99);
+}
+
+.drag-over-card {
+    outline: 2px dashed rgba(59, 130, 246, 0.75);
+    outline-offset: -5px;
 }
 
 .ops-panel-header {
@@ -201,6 +226,12 @@ body {
 .ops-list {
     max-height: 190px;
     overflow: auto;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+}
+
+.ops-list::-webkit-scrollbar {
+    display: none;
 }
 
 .ops-empty {
@@ -300,7 +331,7 @@ body {
     flex: 1;
     display: flex;
     flex-direction: column;
-    overflow: hidden;
+    overflow: visible;
     background: radial-gradient(circle at top right, rgba(59, 130, 246, 0.1), transparent 40%);
 }
 
@@ -438,15 +469,16 @@ h1 {
     padding: 0 32px 32px 32px;
     display: flex;
     flex-direction: column;
-    overflow: hidden; /* Cấm cuộn ở đây để tránh double scroll */
-    min-height: 0; /* Cho phép flexbox co ngót mượt mà */
+    overflow: visible;
+    min-height: auto;
 }
 
 .grid-container {
-    flex: 1;
+    flex: 0 0 auto;
     display: flex;
     flex-direction: column;
-    min-height: 0;
+    min-height: auto;
+    height: auto;
     background: var(--bg-panel);
     border: 1px solid var(--border-color);
     border-radius: 12px;
@@ -456,6 +488,7 @@ h1 {
 
 .grid-header {
     display: flex;
+    flex-shrink: 0;
     padding: 16px 24px;
     background: rgba(0, 0, 0, 0.4); /* Đậm hơn xíu để tách biệt header */
     border-bottom: 1px solid var(--border-color);
@@ -468,8 +501,9 @@ h1 {
 }
 
 .grid-body {
-    flex: 1;
-    overflow-y: auto; /* Chỉ cho phép cuộn bên trong danh sách SIM */
+    flex: 0 0 auto;
+    min-height: auto;
+    overflow: visible;
 }
 
 /* Scrollbar */
@@ -883,17 +917,18 @@ h1 {
     /* === CONTENT AREA === */
     .content-area {
         padding: 0 12px 12px 12px;
-        flex: 1;
-        min-height: 0;
+        flex: 0 0 auto;
+        min-height: auto;
         display: flex;
         flex-direction: column;
+        overflow: visible;
     }
 
     .grid-container {
-        flex: 1;
+        flex: 0 0 auto;
         display: flex;
         flex-direction: column;
-        min-height: 0;
+        min-height: auto;
         background: transparent;
         border: none;
         border-radius: 0;
@@ -904,8 +939,8 @@ h1 {
     }
 
     .grid-body {
-        flex: 1;
-        overflow-y: auto;
+        flex: 0 0 auto;
+        overflow: visible;
         padding-bottom: 24px;
     }
 
