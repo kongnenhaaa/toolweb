@@ -365,6 +365,12 @@ h1 {
 .col-otp { flex: 1; font-family: 'Outfit', sans-serif; font-size: 18px; color: var(--warning); font-weight: 700; }
 .col-actions { width: 300px; display: flex; gap: 8px; justify-content: flex-end; }
 .col-time { width: 150px; color: var(--text-muted); font-size: 14px; }
+.port-health {
+    color: var(--text-muted);
+    font-size: 11px;
+    font-weight: 500;
+    white-space: nowrap;
+}
 
 /* OTP Highlight */
 .otp-badge {

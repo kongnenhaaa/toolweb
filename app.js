@@ -16,10 +16,12 @@ let appliedCommandResults = {};
 let sendingSmsPorts = new Set();
 
 const SMS_WAIT_TIMEOUT_MS = 120000;
+const BALANCE_WAIT_TIMEOUT_MS = 45000;
 const BALANCE_COMMAND_SPACING_MS = 1200;
 const COMMAND_IN_FLIGHT_STATUSES = new Set(['queued', 'running']);
 const COMMAND_SUCCESS_STATUSES = new Set(['sent', 'done', 'success']);
 const COMMAND_FAILED_STATUSES = new Set(['failed', 'timeout', 'error']);
+const CLIENT_SESSION_ID = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
 function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
@@ -123,21 +125,36 @@ async function createCommand({ machineId, portId, recipient, content, type = 'sm
         content,
         type,
         status: 'queued',
+        clientSessionId: CLIENT_SESSION_ID,
         createdAt: firebase.database.ServerValue.TIMESTAMP,
         updatedAt: firebase.database.ServerValue.TIMESTAMP
     });
     return commandId;
 }
 
-function applyCommandResult(commandId, result) {
+async function updateCommandStateIfCurrent(machineId, portId, commandId, payload) {
+    const stateRef = db.ref(`web_states/machines/${machineId}/ports/${portId}`);
+    const snapshot = await stateRef.once('value');
+    const current = snapshot.val() || {};
+    const commandIds = Array.isArray(current.commandIds) ? current.commandIds : [];
+    const isBatchCommand = commandIds.includes(commandId);
+    if (!current.commandId && commandIds.length === 0) return false;
+    if (current.commandId && current.commandId !== commandId && !isBatchCommand) return false;
+    if (!isBatchCommand && current.commandStatus && !COMMAND_IN_FLIGHT_STATUSES.has(current.commandStatus)) return false;
+    await stateRef.update(payload);
+    return true;
+}
+
+async function applyCommandResult(commandId, result) {
     if (!result || !result.machineId || !result.portId) return false;
     if (result.updatedAt && getServerNow() - result.updatedAt > 10 * 60 * 1000) return false;
 
     const stateKey = `${result.machineId}_${result.portId}`;
     const webState = globalWebStates[stateKey] || {};
+    const webStateCommandIds = Array.isArray(webState.commandIds) ? webState.commandIds : [];
     const port = state.ports.find(p => p.id === result.portId && p.machineId === result.machineId);
-    if (webState.commandId && webState.commandId !== commandId) return false;
-    if (!webState.commandId && port?.commandId !== commandId) return false;
+    if (webState.commandId && webState.commandId !== commandId && !webStateCommandIds.includes(commandId)) return false;
+    if (!webState.commandId && webStateCommandIds.length === 0 && port?.commandId !== commandId) return false;
 
     const status = result.status || 'unknown';
     const type = result.type || (result.recipient === 'USSD' ? 'balance' : 'sms');
@@ -158,13 +175,14 @@ function applyCommandResult(commandId, result) {
             : normalizeSmsError(result.error);
 
         pendingBalanceChecks.delete(stateKey);
-        db.ref(`web_states/machines/${result.machineId}/ports/${result.portId}`).update({
+        const didUpdate = await updateCommandStateIfCurrent(result.machineId, result.portId, commandId, {
             smsSent: false,
             commandId,
             commandStatus: 'failed',
             errorMsg: nextError,
             failedAt: firebase.database.ServerValue.TIMESTAMP
         });
+        if (!didUpdate) return false;
         if (port) {
             port.smsSent = false;
             port.errorMsg = nextError;
@@ -182,7 +200,8 @@ function applyCommandResult(commandId, result) {
             updatePayload.errorMsg = null;
         }
 
-        db.ref(`web_states/machines/${result.machineId}/ports/${result.portId}`).update(updatePayload);
+        const didUpdate = await updateCommandStateIfCurrent(result.machineId, result.portId, commandId, updatePayload);
+        if (!didUpdate) return false;
         if (port) {
             port.errorMsg = isActionableSmsError(currentError) ? normalizeSmsError(currentError) : null;
             if (type !== 'sms') {
@@ -353,14 +372,16 @@ function applyWebStates() {
         let isSmsSent = webState.smsSent || false;
         let errorMsg = webState.errorMsg ? normalizeSmsError(webState.errorMsg) : null;
         const smsSentTime = webState.smsSentTime || port.smsSentTime || null;
+        const activeCommandId = webState.commandId || port.commandId || null;
 
         if (isSmsSent && smsSentTime && !port.otp && !errorMsg) {
             const elapsed = getServerNow() - smsSentTime;
             if (elapsed > SMS_WAIT_TIMEOUT_MS) {
                 errorMsg = normalizeSmsError('Quá thời gian chờ OTP');
                 isSmsSent = false;
-                db.ref(`web_states/machines/${port.machineId}/ports/${port.id}`).update({
+                updateCommandStateIfCurrent(port.machineId, port.id, activeCommandId, {
                     smsSent: false,
+                    commandStatus: 'timeout',
                     errorMsg,
                     timedOutAt: firebase.database.ServerValue.TIMESTAMP
                 });
@@ -417,6 +438,7 @@ function applyWebStates() {
         }
 
         port.commandId = webState.commandId || null;
+        port.commandIds = Array.isArray(webState.commandIds) ? webState.commandIds : null;
         port.commandStatus = webState.commandStatus || null;
         port.hidden = shouldHide;
         port.smsSent = isSmsSent;
@@ -511,6 +533,13 @@ function renderPorts() {
             const isChecking = pendingBalanceChecks.has(`${port.machineId}_${port.id}`);
             const commandText = getCommandStatusText(port.commandStatus, port.commandStatus === 'running' && isChecking ? 'balance' : 'sms');
             const isCommandBusy = COMMAND_IN_FLIGHT_STATUSES.has(port.commandStatus);
+            const healthBits = [];
+            if (port.timeoutCount) healthBits.push(`TO:${port.timeoutCount}`);
+            if (port.smsErrorCount) healthBits.push(`SMS:${port.smsErrorCount}`);
+            if (port.reconnectCount) healthBits.push(`RC:${port.reconnectCount}`);
+            const healthText = healthBits.length
+                ? `<br><span class="port-health" title="${escapeHtml(port.lastError || '')}">${escapeHtml(healthBits.join(' · '))}</span>`
+                : '';
 
             let otpContent = port.smsSent ? 
                 `<span style="color: #f39c12">Đang chờ mã... <span class="wait-timer" data-port="${port.id}" data-machine="${port.machineId}"></span></span>` : 
@@ -551,7 +580,7 @@ function renderPorts() {
 
             row.innerHTML = `
                 <div class="col-status">${statusDot}</div>
-                <div class="col-port">${escapeHtml(port.id)}</div>
+                <div class="col-port">${escapeHtml(port.id)}${healthText}</div>
                 <div class="col-phone">${port.phone ? escapeHtml(String(port.phone).replace(/(\d{4})(\d{3})(\d{3})/, '$1 $2 $3')) : '<span style="color:gray; font-style:italic">Trống</span>'}</div>
                 <div class="col-tkc">${escapeHtml(port.balance || 'N/A')}</div>
                 <div class="col-otp">${otpContent}</div>
@@ -803,6 +832,16 @@ async function executeSendSms() {
     const actionPort = state.ports.find(p => p.id === actionPortId && p.machineId === actionMachineId);
     const webState = globalWebStates[actionKey] || {};
 
+    if (!actionPort) {
+        showToast('Không tìm thấy cổng đang chọn, vui lòng tải lại dữ liệu.', 'error');
+        return;
+    }
+
+    if (!actionPort.isTest && actionPort.status !== 'online') {
+        showToast('Cổng này đang offline, không thể gửi SMS.', 'error');
+        return;
+    }
+
     if (sendingSmsPorts.has(actionKey)) {
         showToast('Lệnh gửi SMS đang được tạo, vui lòng đợi.', 'error');
         return;
@@ -828,7 +867,11 @@ async function executeSendSms() {
         return;
     }
     
-    const content = document.getElementById('sms-content').value;
+    const content = document.getElementById('sms-content').value.trim();
+    if (!content) {
+        showToast('Vui lòng nhập nội dung SMS!', 'error');
+        return;
+    }
 
     // Xử lý cổng mô phỏng (Test)
     if (actionPortId.startsWith('COM_TEST')) {
@@ -845,7 +888,11 @@ async function executeSendSms() {
     
     try {
         sendingSmsPorts.add(actionKey);
-        const recipients = recipient.split(',').map(r => r.trim()).filter(r => r);
+        const recipients = [...new Set(recipient.split(',').map(r => r.trim()).filter(r => r))];
+        if (recipients.length === 0) {
+            showToast('Vui lòng nhập đầu số nhận hợp lệ!', 'error');
+            return;
+        }
         const commandIds = [];
         
         for (const rec of recipients) {
@@ -865,6 +912,7 @@ async function executeSendSms() {
             port.otp = null;
             port.errorMsg = null;
             port.commandId = commandIds[commandIds.length - 1] || null;
+            port.commandIds = commandIds;
             port.commandStatus = 'queued';
             
             db.ref(`machines/${actionMachineId}/ports/${actionPortId}/otp`).remove();
@@ -873,6 +921,7 @@ async function executeSendSms() {
                 smsSent: true,
                 smsSentTime: firebase.database.ServerValue.TIMESTAMP,
                 commandId: commandIds[commandIds.length - 1] || null,
+                commandIds,
                 commandStatus: 'queued',
                 errorMsg: null,
                 phone: port.phone || 'NONE'
@@ -905,6 +954,23 @@ window.checkBalance = async function(portId, machineId) {
 
     const stateKey = `${machineId}_${portId}`;
     if (pendingBalanceChecks.has(stateKey)) return; // Đang kiểm tra rồi
+    const webState = globalWebStates[stateKey] || {};
+    const port = state.ports.find(p => p.id === portId && p.machineId === machineId);
+
+    if (!port) {
+        showToast('Không tìm thấy cổng đang chọn.', 'error');
+        return;
+    }
+
+    if (port.status !== 'online') {
+        showToast('Cổng này đang offline, không thể kiểm tra số dư.', 'error');
+        return;
+    }
+
+    if (COMMAND_IN_FLIGHT_STATUSES.has(webState.commandStatus)) {
+        showToast('Cổng này đang xử lý lệnh trước đó.', 'error');
+        return;
+    }
 
     try {
         pendingBalanceChecks.add(stateKey);
@@ -922,7 +988,6 @@ window.checkBalance = async function(portId, machineId) {
             commandStatus: 'queued',
             errorMsg: null
         });
-        const port = state.ports.find(p => p.id === portId && p.machineId === machineId);
         if (port) {
             port.commandId = commandId;
             port.commandStatus = 'queued';
@@ -930,16 +995,16 @@ window.checkBalance = async function(portId, machineId) {
         showToast(`Đã gửi lệnh kiểm tra số dư cho cổng ${portId} (${machineId})`);
 
         // Tự tắt spinner sau 45s nếu không nhận được kết quả
-        setTimeout(() => {
+        setTimeout(async () => {
             if (pendingBalanceChecks.has(stateKey)) {
                 pendingBalanceChecks.delete(stateKey);
-                db.ref(`web_states/machines/${machineId}/ports/${portId}`).update({
+                await updateCommandStateIfCurrent(machineId, portId, commandId, {
                     commandStatus: 'timeout',
                     errorMsg: 'Kiểm tra số dư quá thời gian'
                 });
                 renderPorts();
             }
-        }, 45000);
+        }, BALANCE_WAIT_TIMEOUT_MS);
     } catch (error) {
         pendingBalanceChecks.delete(stateKey);
         renderPorts();
@@ -950,8 +1015,11 @@ window.checkBalance = async function(portId, machineId) {
 window.cancelSmsWait = function(portId, machineId) {
     const stateKey = `${machineId}_${portId}`;
     const webState = globalWebStates[stateKey] || {};
-    if (webState.commandId && COMMAND_IN_FLIGHT_STATUSES.has(webState.commandStatus)) {
-        db.ref(`commands/${webState.commandId}`).remove();
+    const idsToCancel = Array.isArray(webState.commandIds)
+        ? webState.commandIds
+        : (webState.commandId ? [webState.commandId] : []);
+    if (idsToCancel.length && COMMAND_IN_FLIGHT_STATUSES.has(webState.commandStatus)) {
+        idsToCancel.forEach(id => db.ref(`commands/${id}`).remove());
     }
     db.ref(`web_states/machines/${machineId}/ports/${portId}`).remove();
     db.ref(`machines/${machineId}/ports/${portId}/otp`).remove();
@@ -962,6 +1030,7 @@ window.cancelSmsWait = function(portId, machineId) {
         if (port.otp) port.otp = null;
         port.smsSent = false;
         port.commandId = null;
+        port.commandIds = null;
         port.commandStatus = null;
         port.errorMsg = null;
         renderPorts();
@@ -980,14 +1049,18 @@ window.cancelAllSmsWait = function() {
     showToast(`Đang huỷ trạng thái chờ cho ${visiblePorts.length} cổng...`);
     visiblePorts.forEach(port => {
         const webState = globalWebStates[`${port.machineId}_${port.id}`] || {};
-        if (webState.commandId && COMMAND_IN_FLIGHT_STATUSES.has(webState.commandStatus)) {
-            db.ref(`commands/${webState.commandId}`).remove();
+        const idsToCancel = Array.isArray(webState.commandIds)
+            ? webState.commandIds
+            : (webState.commandId ? [webState.commandId] : []);
+        if (idsToCancel.length && COMMAND_IN_FLIGHT_STATUSES.has(webState.commandStatus)) {
+            idsToCancel.forEach(id => db.ref(`commands/${id}`).remove());
         }
         db.ref(`web_states/machines/${port.machineId}/ports/${port.id}`).remove();
         db.ref(`machines/${port.machineId}/ports/${port.id}/otp`).remove();
         if (port.otp) port.otp = null;
         port.smsSent = false;
         port.commandId = null;
+        port.commandIds = null;
         port.commandStatus = null;
         port.errorMsg = null;
     });
@@ -1239,15 +1312,15 @@ window.onload = () => {
         applyWebStates();
     });
 
-    db.ref('command_results').orderByChild('updatedAt').limitToLast(200).on('value', (snapshot) => {
+    db.ref('command_results').orderByChild('updatedAt').limitToLast(200).on('value', async (snapshot) => {
         commandResults = snapshot.val() || {};
-        Object.entries(commandResults).forEach(([commandId, result]) => {
+        for (const [commandId, result] of Object.entries(commandResults)) {
             const signature = `${result.status || ''}_${result.updatedAt || ''}_${result.error || ''}`;
-            if (appliedCommandResults[commandId] === signature) return;
-            if (applyCommandResult(commandId, result)) {
+            if (appliedCommandResults[commandId] === signature) continue;
+            if (await applyCommandResult(commandId, result)) {
                 appliedCommandResults[commandId] = signature;
             }
-        });
+        }
     });
 
     fetchPorts();
