@@ -9,6 +9,7 @@ let lastSyncTime = 0;
 let lastSyncByMachine = {};
 let serverTimeOffset = 0;
 let globalWebStates = {};
+let globalWebStateRefs = {};
 let pendingBalanceChecks = new Set();
 let autoHistoryTimeouts = {};
 let commandResults = {};
@@ -17,6 +18,7 @@ let sendingSmsPorts = new Set();
 
 const SMS_WAIT_TIMEOUT_MS = 120000;
 const BALANCE_WAIT_TIMEOUT_MS = 45000;
+const COMMAND_STALE_TIMEOUT_MS = 180000;
 const BALANCE_COMMAND_SPACING_MS = 1200;
 const COMMAND_IN_FLIGHT_STATUSES = new Set(['queued', 'running']);
 const COMMAND_SUCCESS_STATUSES = new Set(['sent', 'done', 'success']);
@@ -414,6 +416,36 @@ async function releasePortCommandReservation(machineId, portId, commandId, error
     });
 }
 
+async function cleanupStalePortCommands() {
+    const now = getServerNow();
+    const entries = Object.entries(globalWebStates || {});
+
+    for (const [stateKey, webState] of entries) {
+        if (!webState || !COMMAND_IN_FLIGHT_STATUSES.has(webState.commandStatus)) continue;
+
+        const marker = webState.updatedAt || webState.reservedAt || webState.smsSentTime || 0;
+        if (!marker || now - marker < COMMAND_STALE_TIMEOUT_MS) continue;
+
+        const stateRef = globalWebStateRefs[stateKey];
+        if (!stateRef) continue;
+        const { machineId, portId } = stateRef;
+        const commandId = webState.commandId || null;
+
+        if (commandId) {
+            await db.ref(`commands/${commandId}`).remove();
+        }
+
+        await updateCommandStateIfCurrent(machineId, portId, commandId, {
+            smsSent: false,
+            commandId: null,
+            commandIds: null,
+            commandStatus: 'timeout',
+            errorMsg: 'Lệnh bị kẹt quá 3 phút, đã tự dọn',
+            timedOutAt: firebase.database.ServerValue.TIMESTAMP
+        });
+    }
+}
+
 async function updateCommandStateIfCurrent(machineId, portId, commandId, payload) {
     const stateRef = db.ref(`web_states/machines/${machineId}/ports/${portId}`);
     const snapshot = await stateRef.once('value');
@@ -627,17 +659,22 @@ function fetchPorts() {
     db.ref('web_states/machines').on('value', (snapshot) => {
         const statesData = snapshot.val();
         let mergedStates = {};
+        let mergedRefs = {};
         if (statesData) {
             Object.keys(statesData).forEach(mId => {
                 if (statesData[mId].ports) {
                     Object.keys(statesData[mId].ports).forEach(pId => {
-                        mergedStates[`${mId}_${pId}`] = statesData[mId].ports[pId];
+                        const stateKey = `${mId}_${pId}`;
+                        mergedStates[stateKey] = statesData[mId].ports[pId];
+                        mergedRefs[stateKey] = { machineId: mId, portId: pId };
                     });
                 }
             });
         }
         globalWebStates = mergedStates;
+        globalWebStateRefs = mergedRefs;
         applyWebStates();
+        cleanupStalePortCommands();
     });
 }
 
@@ -1643,6 +1680,7 @@ window.onload = () => {
     // Lắng nghe server_status đã được gộp vào fetchPorts() qua lastSyncByMachine
 
     setInterval(checkConnectionStatus, 2000);
+    setInterval(cleanupStalePortCommands, 30000);
 };
 
 function checkConnectionStatus() {
