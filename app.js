@@ -361,9 +361,9 @@ function getCommandStatusText(status, type = 'sms') {
     return '';
 }
 
-async function createCommand({ machineId, portId, recipient, content, type = 'sms' }) {
-    const commandRef = db.ref('commands').push();
-    const commandId = commandRef.key;
+async function createCommand({ machineId, portId, recipient, content, type = 'sms', commandId = null }) {
+    const commandRef = commandId ? db.ref(`commands/${commandId}`) : db.ref('commands').push();
+    commandId = commandId || commandRef.key;
     await commandRef.set({
         id: commandId,
         machineId,
@@ -377,6 +377,41 @@ async function createCommand({ machineId, portId, recipient, content, type = 'sm
         updatedAt: firebase.database.ServerValue.TIMESTAMP
     });
     return commandId;
+}
+
+async function reservePortCommand({ machineId, portId, commandId, type = 'sms', phone = 'NONE' }) {
+    const stateRef = db.ref(`web_states/machines/${machineId}/ports/${portId}`);
+    const result = await stateRef.transaction(current => {
+        current = current || {};
+        if (COMMAND_IN_FLIGHT_STATUSES.has(current.commandStatus)) return;
+        if (type === 'sms' && current.smsSent && !isActionableSmsError(current.errorMsg)) return;
+
+        return {
+            ...current,
+            smsSent: type === 'sms' ? true : (current.smsSent || false),
+            smsSentTime: type === 'sms' ? firebase.database.ServerValue.TIMESTAMP : (current.smsSentTime || null),
+            commandId,
+            commandIds: null,
+            commandStatus: 'queued',
+            errorMsg: null,
+            phone: phone || current.phone || 'NONE',
+            reservedBy: CLIENT_SESSION_ID,
+            reservedAt: firebase.database.ServerValue.TIMESTAMP
+        };
+    }, undefined, false);
+
+    return result.committed;
+}
+
+async function releasePortCommandReservation(machineId, portId, commandId, errorMsg = null) {
+    await updateCommandStateIfCurrent(machineId, portId, commandId, {
+        smsSent: false,
+        commandId: null,
+        commandIds: null,
+        commandStatus: errorMsg ? 'failed' : null,
+        errorMsg,
+        releasedAt: firebase.database.ServerValue.TIMESTAMP
+    });
 }
 
 async function updateCommandStateIfCurrent(machineId, portId, commandId, payload) {
@@ -1119,9 +1154,15 @@ async function executeSendSms() {
     if (recipient === 'custom') {
         recipient = document.getElementById('sms-recipient-custom').value;
     }
+    recipient = (recipient || '').trim();
     
     if (!recipient) {
         showToast('Vui lòng nhập đầu số nhận!', 'error');
+        return;
+    }
+
+    if (/[,;\s]/.test(recipient)) {
+        showToast('Chỉ được nhập một đầu số mỗi lần gửi. Không dùng dấu phẩy hoặc khoảng trắng.', 'error');
         return;
     }
     
@@ -1144,46 +1185,44 @@ async function executeSendSms() {
         return;
     }
     
+    let commandId = null;
     try {
         sendingSmsPorts.add(actionKey);
-        const recipients = [...new Set(recipient.split(',').map(r => r.trim()).filter(r => r))];
-        if (recipients.length === 0) {
-            showToast('Vui lòng nhập đầu số nhận hợp lệ!', 'error');
+        commandId = db.ref('commands').push().key;
+        const reserved = await reservePortCommand({
+            machineId: actionMachineId,
+            portId: actionPortId,
+            commandId,
+            type: 'sms',
+            phone: actionPort.phone || 'NONE'
+        });
+
+        if (!reserved) {
+            showToast('Cổng này vừa được người khác giữ lệnh, vui lòng đợi.', 'error');
             return;
         }
-        const commandIds = [];
-        
-        for (const rec of recipients) {
-            const commandId = await createCommand({
-                machineId: actionMachineId,
-                portId: actionPortId,
-                recipient: rec,
-                content: content,
-                type: 'sms'
-            });
-            commandIds.push(commandId);
-        }
+
+        await createCommand({
+            machineId: actionMachineId,
+            portId: actionPortId,
+            recipient,
+            content: content,
+            type: 'sms',
+            commandId
+        });
         
         const port = state.ports.find(p => p.id === actionPortId && p.machineId === actionMachineId);
         if (port && !port.isTest) {
             // Xoá OTP cũ hiển thị trên trình duyệt để chuyển sang trạng thái "Đang chờ mã..."
             port.otp = null;
             port.errorMsg = null;
-            port.commandId = commandIds[commandIds.length - 1] || null;
-            port.commandIds = commandIds;
+            port.commandId = commandId;
+            port.commandIds = null;
             port.commandStatus = 'queued';
             
             await Promise.all([
                 db.ref(`machines/${actionMachineId}/ports/${actionPortId}/otp`).remove(),
-                db.ref(`web_states/machines/${actionMachineId}/ports/${actionPortId}`).update({
-                    smsSent: true,
-                    smsSentTime: firebase.database.ServerValue.TIMESTAMP,
-                    commandId: commandIds[commandIds.length - 1] || null,
-                    commandIds,
-                    commandStatus: 'queued',
-                    errorMsg: null,
-                    phone: port.phone || 'NONE'
-                })
+                db.ref(`web_states/machines/${actionMachineId}/ports/${actionPortId}`).update({ errorMsg: null })
             ]);
         } else if (port) {
             port.otp = null;
@@ -1191,12 +1230,11 @@ async function executeSendSms() {
             renderPorts();
         }
         
-        if (recipients.length > 1) {
-            showToast(`Đã gửi ${recipients.length} lệnh SMS từ ${actionPortId} (${actionMachineId})`);
-        } else {
-            showToast(`Đã gửi lệnh SMS từ ${actionPortId} (${actionMachineId}) đến ${recipients[0]}`);
-        }
+        showToast(`Đã gửi lệnh SMS từ ${actionPortId} (${actionMachineId}) đến ${recipient}`);
     } catch (error) {
+        if (commandId) {
+            await releasePortCommandReservation(actionMachineId, actionPortId, commandId, 'Không thể đẩy lệnh lên Firebase');
+        }
         showToast('Không thể đẩy lệnh lên Firebase!', 'error');
     } finally {
         sendingSmsPorts.delete(actionKey);
@@ -1231,21 +1269,34 @@ window.checkBalance = async function(portId, machineId) {
         return;
     }
 
+    let commandId = null;
     try {
         pendingBalanceChecks.add(stateKey);
         renderPorts();
 
-        const commandId = await createCommand({
+        commandId = db.ref('commands').push().key;
+        const reserved = await reservePortCommand({
+            machineId,
+            portId,
+            commandId,
+            type: 'balance',
+            phone: port.phone || 'NONE'
+        });
+
+        if (!reserved) {
+            pendingBalanceChecks.delete(stateKey);
+            showToast('Cổng này vừa được người khác giữ lệnh, vui lòng đợi.', 'error');
+            renderPorts();
+            return;
+        }
+
+        await createCommand({
             machineId: machineId,
             portId: portId,
             recipient: 'USSD',
             content: 'BALANCE',
-            type: 'balance'
-        });
-        await db.ref(`web_states/machines/${machineId}/ports/${portId}`).update({
-            commandId,
-            commandStatus: 'queued',
-            errorMsg: null
+            type: 'balance',
+            commandId
         });
         if (port) {
             port.commandId = commandId;
@@ -1265,6 +1316,9 @@ window.checkBalance = async function(portId, machineId) {
             }
         }, BALANCE_WAIT_TIMEOUT_MS);
     } catch (error) {
+        if (commandId) {
+            await releasePortCommandReservation(machineId, portId, commandId, 'Không thể đẩy lệnh lên Firebase');
+        }
         pendingBalanceChecks.delete(stateKey);
         renderPorts();
         showToast('Không thể đẩy lệnh lên Firebase!', 'error');
