@@ -797,13 +797,7 @@ function renderPorts() {
             const isChecking = pendingBalanceChecks.has(`${port.machineId}_${port.id}`);
             const commandText = getCommandStatusText(port.commandStatus, port.commandStatus === 'running' && isChecking ? 'balance' : 'sms');
             const isCommandBusy = COMMAND_IN_FLIGHT_STATUSES.has(port.commandStatus);
-            const healthBits = [];
-            if (port.timeoutCount) healthBits.push(`TO:${port.timeoutCount}`);
-            if (port.smsErrorCount) healthBits.push(`SMS:${port.smsErrorCount}`);
-            if (port.reconnectCount) healthBits.push(`RC:${port.reconnectCount}`);
-            const healthText = healthBits.length
-                ? `<br><span class="port-health" title="${escapeHtml(port.lastError || '')}">${escapeHtml(healthBits.join(' · '))}</span>`
-                : '';
+            const healthText = '';
 
             let otpContent = port.smsSent ? 
                 `<span style="color: #f39c12">Đang chờ mã... <span class="wait-timer" data-port="${port.id}" data-machine="${port.machineId}"></span></span>` : 
