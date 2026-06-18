@@ -18,7 +18,7 @@ let sendingSmsPorts = new Set();
 
 const SMS_WAIT_TIMEOUT_MS = 120000;
 const BALANCE_WAIT_TIMEOUT_MS = 45000;
-const COMMAND_STALE_TIMEOUT_MS = 180000;
+const COMMAND_STALE_TIMEOUT_MS = 10 * 60 * 1000;
 const BALANCE_COMMAND_SPACING_MS = 1200;
 const COMMAND_IN_FLIGHT_STATUSES = new Set(['queued', 'running']);
 const COMMAND_SUCCESS_STATUSES = new Set(['sent', 'done', 'success']);
@@ -307,8 +307,6 @@ function normalizeText(value) {
         .replace(/[\u0300-\u036f]/g, '')
         .replace(/đ/g, 'd')
         .replace(/Đ/g, 'D')
-        .replace(/Ä‘/g, 'd')
-        .replace(/Ä/g, 'D')
         .toLowerCase();
 }
 
@@ -327,9 +325,8 @@ function isActionableSmsError(message) {
         || normalized.includes('khong thuc hien yeu cau')
         || normalized.includes('het tien')
         || normalized.includes('khong du tien')
-        || (rawLower.includes('khÃ') && rawLower.includes('yÃ') && rawLower.includes('mÃ£'))
-        || rawLower.includes('háº¿t tiá»n')
-        || rawLower.includes('sai Ä‘áº§u sá»‘');
+        || rawLower.includes('hết tiền')
+        || rawLower.includes('sai đầu số');
 }
 
 function normalizeSmsError(message, fallback = 'Lệnh thất bại') {
@@ -338,13 +335,13 @@ function normalizeSmsError(message, fallback = 'Lệnh thất bại') {
     const normalized = normalizeText(raw);
 
     if (!raw) return fallback;
-    if (normalized.includes('chon sai dau so') || normalized.includes('sai dau so') || normalized.includes('sai cu phap') || rawLower.includes('sai Ä‘áº§u sá»‘')) {
+    if (normalized.includes('chon sai dau so') || normalized.includes('sai dau so') || normalized.includes('sai cu phap') || rawLower.includes('sai đầu số')) {
         return 'Chọn sai đầu số';
     }
-    if (normalized.includes('sdt dang khong yeu cau ma') || normalized.includes('khong yeu cau ma') || normalized.includes('khong co yeu cau ma') || normalized.includes('khong thuc hien yeu cau') || (rawLower.includes('khÃ') && rawLower.includes('yÃ') && rawLower.includes('mÃ£'))) {
+    if (normalized.includes('sdt dang khong yeu cau ma') || normalized.includes('khong yeu cau ma') || normalized.includes('khong co yeu cau ma') || normalized.includes('khong thuc hien yeu cau')) {
         return 'SĐT đang không yêu cầu mã';
     }
-    if (normalized.includes('het tien') || normalized.includes('khong du tien') || rawLower.includes('háº¿t tiá»n')) {
+    if (normalized.includes('het tien') || normalized.includes('khong du tien') || rawLower.includes('hết tiền')) {
         return 'Hết tiền';
     }
     if (normalized.includes('qua thoi gian cho otp') || normalized.includes('timeout')) {
@@ -398,7 +395,8 @@ async function reservePortCommand({ machineId, portId, commandId, type = 'sms', 
             errorMsg: null,
             phone: phone || current.phone || 'NONE',
             reservedBy: CLIENT_SESSION_ID,
-            reservedAt: firebase.database.ServerValue.TIMESTAMP
+            reservedAt: firebase.database.ServerValue.TIMESTAMP,
+            updatedAt: firebase.database.ServerValue.TIMESTAMP
         };
     }, undefined, false);
 
@@ -423,7 +421,11 @@ async function cleanupStalePortCommands() {
     for (const [stateKey, webState] of entries) {
         if (!webState || !COMMAND_IN_FLIGHT_STATUSES.has(webState.commandStatus)) continue;
 
-        const marker = webState.updatedAt || webState.reservedAt || webState.smsSentTime || 0;
+        const marker = Math.max(
+            Number(webState.updatedAt || 0),
+            Number(webState.reservedAt || 0),
+            Number(webState.smsSentTime || 0)
+        );
         if (!marker || now - marker < COMMAND_STALE_TIMEOUT_MS) continue;
 
         const stateRef = globalWebStateRefs[stateKey];
@@ -440,7 +442,7 @@ async function cleanupStalePortCommands() {
             commandId: null,
             commandIds: null,
             commandStatus: 'timeout',
-            errorMsg: 'Lệnh bị kẹt quá 3 phút, đã tự dọn',
+            errorMsg: 'Command stuck over 10 minutes, auto cleaned',
             timedOutAt: firebase.database.ServerValue.TIMESTAMP
         });
     }
@@ -638,8 +640,7 @@ function fetchPorts() {
                 if (!isInitialFirebaseLoad && (!existingPort || existingPort.otp !== newPort.otp)) {
                     scheduleAutoHistory(newPort.id, newPort.machineId);
                     // Thông báo khi có OTP mới
-                    showToast(`Có mã OTP mới ở cổng ${newPort.id} (${newPort.machineId})!`);
-                    playNotificationSound();
+                    // OTP mới vẫn hiển thị trên bảng, không hiện toast/âm thanh.
                 }
             }
         });
@@ -767,12 +768,7 @@ function applyWebStates() {
     renderPorts();
 }
 
-// Render Ports
-function renderPorts() {
-    const container = document.getElementById('ports-container');
-    renderOperationalPanels();
-    container.innerHTML = '';
-
+function getVisibleActivePorts() {
     // Sort ALL ports by COM number to guarantee stable order for division
     const allPorts = [...state.ports].sort((a, b) => {
         const numA = parseInt(a.id.replace(/\D/g, '')) || 0;
@@ -833,6 +829,17 @@ function renderPorts() {
     if (onlyHeavyErrors) {
         portsToRender = portsToRender.filter(p => ((p.timeoutCount || 0) + (p.smsErrorCount || 0) + (p.reconnectCount || 0)) >= 2);
     }
+
+    return portsToRender;
+}
+
+// Render Ports
+function renderPorts() {
+    const container = document.getElementById('ports-container');
+    renderOperationalPanels();
+    container.innerHTML = '';
+
+    const portsToRender = getVisibleActivePorts();
 
     if (portsToRender.length === 0) {
         container.innerHTML = `<div style="padding: 40px; text-align: center; color: var(--text-muted);">Không có cổng nào (hoặc đã dùng hết) trong phần này.</div>`;
@@ -1090,6 +1097,72 @@ function exportHistoryToExcel() {
     document.body.removeChild(link);
     
     showToast('Đã xuất báo cáo Excel thành công!');
+}
+
+function exportActivePortsToExcel() {
+    const ports = getVisibleActivePorts().filter(port => port.phone && port.phone !== 'N/A' && port.phone !== 'Unknown');
+    if (ports.length === 0) {
+        showToast('Không có SĐT đang hoạt động để xuất!', 'error');
+        return;
+    }
+
+    let html = `
+        <html xmlns:o="urn:schemas-microsoft-com:office:office"
+              xmlns:x="urn:schemas-microsoft-com:office:excel"
+              xmlns="http://www.w3.org/TR/REC-html40">
+        <head>
+            <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+            <style>
+                table { border-collapse: collapse; font-family: 'Times New Roman', Times, serif; }
+                th { background-color: #1976D2; color: #ffffff; font-weight: bold; border: 1px solid #000000; padding: 10px; font-size: 13pt; text-align: center; }
+                td { border: 1px solid #000000; padding: 8px; font-size: 12pt; text-align: center; vertical-align: middle; }
+                .text-cell { mso-number-format: "\\@"; }
+                .title-row { font-size: 18pt; font-weight: bold; color: #D32F2F; text-align: center; height: 50px; vertical-align: middle; }
+            </style>
+        </head>
+        <body>
+            <table>
+                <tr>
+                    <td colspan="4" class="title-row">DANH SÁCH SĐT ĐANG HOẠT ĐỘNG</td>
+                </tr>
+                <tr>
+                    <td colspan="4" style="text-align: center; font-style: italic; height: 30px; font-size: 11pt;">Ngày xuất báo cáo: ${new Date().toLocaleString('vi-VN')}</td>
+                </tr>
+                <tr>
+                    <th style="width: 80px;">Cổng</th>
+                    <th style="width: 150px;">Số Điện Thoại</th>
+                    <th style="width: 150px;">TKC</th>
+                    <th style="width: 150px;">Máy</th>
+                </tr>
+    `;
+
+    ports.forEach(port => {
+        html += `
+                <tr>
+                    <td>${escapeHtml(port.id || '')}</td>
+                    <td class="text-cell">${escapeHtml(String(port.phone || '').replace(/\s+/g, ''))}</td>
+                    <td class="text-cell">${escapeHtml(port.balance || 'N/A')}</td>
+                    <td class="text-cell">${escapeHtml(port.machineId || '')}</td>
+                </tr>`;
+    });
+
+    html += `
+            </table>
+        </body>
+        </html>
+    `;
+
+    const blob = new Blob([html], { type: 'application/vnd.ms-excel;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `SDT_TKC_Dang_Hoat_Dong_${new Date().toLocaleDateString('vi-VN').replace(/\//g, '-')}.xls`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+
+    showToast(`Đã xuất ${ports.length} SĐT/TKC đang hoạt động!`);
 }
 
 // Modal Logic
@@ -1548,7 +1621,7 @@ function simulateOtpArrival(portId, machineId, isZalo = false) {
             port.otp = isZalo ? Math.floor(1000 + Math.random() * 9000).toString() : Math.floor(100000 + Math.random() * 900000).toString();
             scheduleAutoHistory(portId, machineId);
             renderPorts();
-            showToast(`Có mã OTP mới ở cổng ${portId}!`);
+                    // OTP mới vẫn hiển thị trên bảng, không hiện toast/âm thanh.
         }
     }, 3000);
 }
