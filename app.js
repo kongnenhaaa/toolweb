@@ -1554,6 +1554,8 @@ async function markAsUsed(portId, machineId) {
                     if (current) return current;
                     return {
                         ...port,
+                        machineId: machineId,
+                        id: portId,
                         usedTime: new Date().toLocaleTimeString('vi-VN'),
                         timestamp: firebase.database.ServerValue.TIMESTAMP
                     };
