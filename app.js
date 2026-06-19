@@ -52,6 +52,11 @@ function parseBalanceValue(balance) {
     return parseInt(String(balance).replace(/[^\d]/g, ''), 10) || 0;
 }
 
+function normalizePhoneNumber(phone) {
+    if (phone == null) return phone;
+    return String(phone).replace(/\s+/g, '').trim();
+}
+
 function getPortUiStatus(port) {
     if (port.errorMsg) return 'error';
     if (COMMAND_IN_FLIGHT_STATUSES.has(port.commandStatus)) return 'busy';
@@ -270,11 +275,14 @@ function renderCommandMonitor() {
         const status = result.status || 'unknown';
         const time = result.updatedAt ? new Date(result.updatedAt).toLocaleTimeString('vi-VN') : '--:--';
         const content = result.type === 'balance' ? 'Kiểm tra TKC' : (result.content || '');
+        const port = state.ports.find(p => p.id === result.portId && p.machineId === result.machineId);
+        const otp = port?.otp ? escapeHtml(String(port.otp)) : '<span style="color: var(--text-muted);">--</span>';
         return `
             <div class="ops-item">
                 <div>
                     <div class="ops-title">${escapeHtml(result.portId)} <span class="status-pill ${escapeHtml(status)}">${escapeHtml(getCommandStatusText(status, result.type) || status)}</span></div>
                     <div class="ops-sub">${escapeHtml(result.machineId)} · ${escapeHtml(result.recipient || '')}</div>
+                    <div class="ops-sub">OTP: ${otp}</div>
                 </div>
                 <div class="ops-sub">${escapeHtml(content)}</div>
                 <div class="ops-sub">${escapeHtml(time)}</div>
@@ -628,6 +636,9 @@ function fetchPorts() {
         }
         
         allPorts.forEach(newPort => {
+            if (newPort.phone) {
+                newPort.phone = normalizePhoneNumber(newPort.phone);
+            }
             const existingPort = state.ports.find(p => p.id === newPort.id && p.machineId === newPort.machineId);
 
             // Giữ lại OTP trên giao diện nếu C# lỡ xoá sớm (nhưng SĐT vẫn giữ nguyên)
@@ -753,9 +764,9 @@ function applyWebStates() {
         // TỰ ĐỘNG ẨN NẾU SĐT ĐÃ CÓ TRONG LỊCH SỬ (HISTORY)
         if (!shouldHide && port.phone && port.phone !== 'N/A' && port.phone !== 'Unknown') {
             // Xóa hết khoảng trắng nếu có để so sánh chính xác
-            const cleanPhone = port.phone.replace(/\s+/g, '');
+            const cleanPhone = normalizePhoneNumber(port.phone);
             const inHistory = state.history.some(h => {
-                const hPhone = h.phone ? h.phone.replace(/\s+/g, '') : '';
+                const hPhone = h.phone ? normalizePhoneNumber(h.phone) : '';
                 return hPhone === cleanPhone;
             });
             if (inHistory) {
@@ -925,7 +936,7 @@ function renderPorts() {
             row.innerHTML = `
                 <div class="col-status">${statusDot}</div>
                 <div class="col-port">${escapeHtml(port.id)}${healthText}</div>
-                <div class="col-phone">${port.phone ? escapeHtml(String(port.phone).replace(/(\d{4})(\d{3})(\d{3})/, '$1 $2 $3')) : '<span style="color:gray; font-style:italic">Trống</span>'}</div>
+                <div class="col-phone">${port.phone ? escapeHtml(normalizePhoneNumber(port.phone)) : '<span style="color:gray; font-style:italic">Trống</span>'}</div>
                 <div class="col-tkc">${escapeHtml(port.balance || 'N/A')}</div>
                 <div class="col-otp">${otpContent}</div>
                 <div class="col-actions">
@@ -1004,7 +1015,7 @@ function renderHistory() {
     const uniqueHistory = [];
     const seen = new Set();
     
-    const sortedHistory = [...state.history].sort((a, b) => new Date(b.usedTime) - new Date(a.usedTime));
+    const sortedHistory = [...state.history].sort((a, b) => getHistorySortTimestamp(b) - getHistorySortTimestamp(a));
     
     sortedHistory.forEach(item => {
         const uniqueKey = `${item.id}-${item.phone}-${item.otp}`;
@@ -1020,7 +1031,7 @@ function renderHistory() {
 
         row.innerHTML = `
             <div class="col-port">${escapeHtml(item.id)} <br><span style="font-size: 11px; color: #aaa;">${escapeHtml(item.machineId || '')}</span></div>
-            <div class="col-phone">${item.phone ? escapeHtml(String(item.phone).replace(/(\d{4})(\d{3})(\d{3})/, '$1 $2 $3')) : '<span style="color:gray; font-style:italic">Trống</span>'}</div>
+            <div class="col-phone">${item.phone ? escapeHtml(normalizePhoneNumber(item.phone)) : '<span style="color:gray; font-style:italic">Trống</span>'}</div>
             <div class="col-otp"><span style="color: var(--success); font-weight: bold;">${escapeHtml(item.otp)}</span></div>
             <div class="col-time">${escapeHtml(item.usedTime)}</div>
             <div class="col-actions">
@@ -1030,7 +1041,7 @@ function renderHistory() {
             </div>
         `;
 
-        container.prepend(row);
+        container.appendChild(row);
     });
 
     lucide.createIcons();
@@ -1075,7 +1086,7 @@ function exportHistoryToExcel() {
     `;
     
     state.history.forEach(item => {
-        const phone = escapeHtml(item.phone || '');
+        const phone = escapeHtml(normalizePhoneNumber(item.phone || ''));
         const otp = escapeHtml(item.otp || '');
         const time = escapeHtml(item.usedTime || '');
         
@@ -1147,7 +1158,7 @@ function exportActivePortsToExcel() {
         html += `
                 <tr>
                     <td>${escapeHtml(port.id || '')}</td>
-                    <td class="text-cell">${escapeHtml(String(port.phone || '').replace(/\s+/g, ''))}</td>
+                    <td class="text-cell">${escapeHtml(normalizePhoneNumber(port.phone || ''))}</td>
                     <td class="text-cell">${escapeHtml(port.balance || 'N/A')}</td>
                     <td class="text-cell">${escapeHtml(port.machineId || '')}</td>
                 </tr>`;
@@ -1635,6 +1646,14 @@ function simulateOtpArrival(portId, machineId, isZalo = false) {
     }, 3000);
 }
 
+function getHistorySortTimestamp(item) {
+    const timestamp = Number(item?.timestamp || item?.updatedAt || item?.createdAt || 0);
+    if (Number.isFinite(timestamp) && timestamp > 0) return timestamp;
+
+    const parsedUsedTime = Date.parse(item?.usedTime || '');
+    return Number.isFinite(parsedUsedTime) ? parsedUsedTime : 0;
+}
+
 function simulateIncomingOtp() {
     // Tạo một cổng mô phỏng mới
     const testId = `COM_TEST_${Math.floor(100 + Math.random() * 900)}`;
@@ -1732,7 +1751,11 @@ window.onload = () => {
     db.ref('history').orderByChild('timestamp').limitToLast(200).on('value', (snapshot) => {
         const data = snapshot.val();
         if (data) {
-            state.history = Object.entries(data).map(([key, value]) => ({...value, fbKey: key}));
+            state.history = Object.entries(data).map(([key, value]) => ({
+                ...value,
+                phone: value?.phone ? normalizePhoneNumber(value.phone) : value?.phone,
+                fbKey: key
+            }));
         } else {
             state.history = [];
         }
