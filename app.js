@@ -186,7 +186,7 @@ function renderOpsDashboard() {
     const online = ports.filter(p => p.status === 'online').length;
     const offline = ports.length - online;
     const waitingOtp = ports.filter(p => p.smsSent && !p.otp && !p.errorMsg).length;
-    const smsErrors = ports.filter(p => p.errorMsg || (p.smsErrorCount || 0) > 0 || (p.timeoutCount || 0) > 0).length;
+    const smsErrors = ports.filter(p => p.errorMsg).length;
     const runningCommands = ports.filter(p => COMMAND_IN_FLIGHT_STATUSES.has(p.commandStatus)).length;
     const now = getServerNow();
     const lostMachines = Object.entries(lastSyncByMachine).filter(([, sync]) => now - sync > 15000).length;
@@ -215,7 +215,7 @@ function renderErrorPanel() {
 
     const ports = state.ports
         .filter(p => !p.isTest && !p.hidden)
-        .filter(p => p.errorMsg || (p.timeoutCount || 0) > 0 || (p.smsErrorCount || 0) > 0 || String(p.status).toLowerCase() !== 'online')
+        .filter(p => p.errorMsg)
         .sort((a, b) => ((b.timeoutCount || 0) + (b.smsErrorCount || 0)) - ((a.timeoutCount || 0) + (a.smsErrorCount || 0)))
         .slice(0, 8);
 
@@ -226,7 +226,7 @@ function renderErrorPanel() {
     }
 
     list.innerHTML = ports.map(port => {
-        const err = normalizeSmsError(port.errorMsg || port.lastError || (port.status === 'online' ? 'Có dấu hiệu lỗi cần theo dõi' : 'Cổng offline'));
+        const err = normalizeSmsError(port.errorMsg);
         const totalErrors = (port.timeoutCount || 0) + (port.smsErrorCount || 0);
         return `
             <div class="ops-item">
@@ -454,9 +454,12 @@ async function updateCommandStateIfCurrent(machineId, portId, commandId, payload
     const current = snapshot.val() || {};
     const commandIds = Array.isArray(current.commandIds) ? current.commandIds : [];
     const isBatchCommand = commandIds.includes(commandId);
+    const isCurrentSmsWaitTimeout = payload?.commandStatus === 'timeout'
+        && current.commandId === commandId
+        && current.smsSent === true;
     if (!current.commandId && commandIds.length === 0) return false;
     if (current.commandId && current.commandId !== commandId && !isBatchCommand) return false;
-    if (!isBatchCommand && current.commandStatus && !COMMAND_IN_FLIGHT_STATUSES.has(current.commandStatus)) return false;
+    if (!isCurrentSmsWaitTimeout && !isBatchCommand && current.commandStatus && !COMMAND_IN_FLIGHT_STATUSES.has(current.commandStatus)) return false;
     await stateRef.update(payload);
     return true;
 }
@@ -469,6 +472,8 @@ async function applyCommandResult(commandId, result) {
     const webState = globalWebStates[stateKey] || {};
     const webStateCommandIds = Array.isArray(webState.commandIds) ? webState.commandIds : [];
     const port = state.ports.find(p => p.id === result.portId && p.machineId === result.machineId);
+    const isOwnResult = webState.reservedBy === CLIENT_SESSION_ID || port?.commandId === commandId;
+    if (!isOwnResult) return false;
     if (webState.commandId && webState.commandId !== commandId && !webStateCommandIds.includes(commandId)) return false;
     if (!webState.commandId && webStateCommandIds.length === 0 && port?.commandId !== commandId) return false;
 
@@ -687,14 +692,15 @@ function applyWebStates() {
 
         const stateKey = `${port.machineId}_${port.id}`;
         const webState = globalWebStates[stateKey] || {};
+        const isOwnWebCommand = webState.reservedBy === CLIENT_SESSION_ID;
         
         let shouldHide = false;
         let isSmsSent = webState.smsSent || false;
-        let errorMsg = webState.errorMsg ? normalizeSmsError(webState.errorMsg) : null;
+        let errorMsg = isOwnWebCommand && webState.errorMsg ? normalizeSmsError(webState.errorMsg) : null;
         const smsSentTime = webState.smsSentTime || port.smsSentTime || null;
         const activeCommandId = webState.commandId || port.commandId || null;
 
-        if (isSmsSent && smsSentTime && !port.otp && !errorMsg) {
+        if (isOwnWebCommand && isSmsSent && smsSentTime && !port.otp && !errorMsg) {
             const elapsed = getServerNow() - smsSentTime;
             if (elapsed > SMS_WAIT_TIMEOUT_MS) {
                 errorMsg = normalizeSmsError('Quá thời gian chờ OTP');
@@ -757,9 +763,10 @@ function applyWebStates() {
             }
         }
 
-        port.commandId = webState.commandId || null;
-        port.commandIds = Array.isArray(webState.commandIds) ? webState.commandIds : null;
-        port.commandStatus = webState.commandStatus || null;
+        const shouldShowCommandState = isOwnWebCommand || COMMAND_IN_FLIGHT_STATUSES.has(webState.commandStatus);
+        port.commandId = shouldShowCommandState ? (webState.commandId || null) : null;
+        port.commandIds = shouldShowCommandState && Array.isArray(webState.commandIds) ? webState.commandIds : null;
+        port.commandStatus = shouldShowCommandState ? (webState.commandStatus || null) : null;
         port.hidden = shouldHide;
         port.smsSent = isSmsSent;
         port.errorMsg = errorMsg;
@@ -1291,7 +1298,7 @@ async function executeSendSms() {
         closeModal('sms-modal');
         
         // Mô phỏng mã OTP về sau 3 giây
-        simulateOtpArrival(actionPortId, content.toUpperCase().includes('ZALO'));
+        simulateOtpArrival(actionPortId, actionMachineId, content.toUpperCase().includes('ZALO'));
         return;
     }
     
@@ -1738,14 +1745,19 @@ window.onload = () => {
     });
 
     db.ref('command_results').orderByChild('updatedAt').limitToLast(200).on('value', async (snapshot) => {
-        commandResults = snapshot.val() || {};
-        for (const [commandId, result] of Object.entries(commandResults)) {
+        const results = snapshot.val() || {};
+        const visibleResults = { ...commandResults };
+
+        for (const [commandId, result] of Object.entries(results)) {
             const signature = `${result.status || ''}_${result.updatedAt || ''}_${result.error || ''}`;
             if (appliedCommandResults[commandId] === signature) continue;
             if (await applyCommandResult(commandId, result)) {
                 appliedCommandResults[commandId] = signature;
+                visibleResults[commandId] = result;
             }
         }
+
+        commandResults = visibleResults;
         renderOperationalPanels();
     });
 
