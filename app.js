@@ -725,6 +725,14 @@ function applyWebStates() {
             }
         }
 
+        if (webState.clearedOtp) {
+            if (port.otp === webState.clearedOtp) {
+                port.otp = null;
+            } else if (port.otp && port.otp !== webState.clearedOtp) {
+                db.ref(`web_states/machines/${port.machineId}/ports/${port.id}/clearedOtp`).remove();
+            }
+        }
+
         if (webState.hiddenOtp) {
             // Đã bị ẩn bởi một người dùng nào đó
             // Ktra xem C# có cập nhật SĐT mới không (thay SIM)?
@@ -762,6 +770,7 @@ function applyWebStates() {
         }
 
         // TỰ ĐỘNG ẨN NẾU SĐT ĐÃ CÓ TRONG LỊCH SỬ (HISTORY)
+        /* Đã tắt theo yêu cầu
         if (!shouldHide && port.phone && port.phone !== 'N/A' && port.phone !== 'Unknown') {
             // Xóa hết khoảng trắng nếu có để so sánh chính xác
             const cleanPhone = normalizePhoneNumber(port.phone);
@@ -773,6 +782,7 @@ function applyWebStates() {
                 shouldHide = true;
             }
         }
+        */
 
         const shouldShowCommandState = isOwnWebCommand || COMMAND_IN_FLIGHT_STATUSES.has(webState.commandStatus);
         port.commandId = shouldShowCommandState ? (webState.commandId || null) : null;
@@ -1159,7 +1169,7 @@ function exportActivePortsToExcel() {
                 <tr>
                     <td>${escapeHtml(port.id || '')}</td>
                     <td class="text-cell">${escapeHtml(normalizePhoneNumber(port.phone || ''))}</td>
-                    <td class="text-cell">${escapeHtml(port.balance || 'N/A')}</td>
+                    <td class="text-cell">${escapeHtml(String(port.balance || 'N/A').replace(/vnd|vnđ/ig, '').trim())}</td>
                     <td class="text-cell">${escapeHtml(port.machineId || '')}</td>
                 </tr>`;
     });
@@ -1462,11 +1472,16 @@ window.cancelSmsWait = function(portId, machineId) {
     if (idsToCancel.length && COMMAND_IN_FLIGHT_STATUSES.has(webState.commandStatus)) {
         idsToCancel.forEach(id => db.ref(`commands/${id}`).remove());
     }
-    db.ref(`web_states/machines/${machineId}/ports/${portId}`).remove();
+    
+    const port = state.ports.find(p => p.id === portId && p.machineId === machineId);
+    if (port && port.otp) {
+        db.ref(`web_states/machines/${machineId}/ports/${portId}`).update({ clearedOtp: port.otp, smsSent: null, commandId: null, commandIds: null, commandStatus: null, errorMsg: null });
+    } else {
+        db.ref(`web_states/machines/${machineId}/ports/${portId}`).remove();
+    }
     db.ref(`machines/${machineId}/ports/${portId}/otp`).remove();
     
     // Xoá OTP trên giao diện nếu đang có
-    const port = state.ports.find(p => p.id === portId && p.machineId === machineId);
     if (port) {
         if (port.otp) port.otp = null;
         port.smsSent = false;
@@ -1496,7 +1511,11 @@ window.cancelAllSmsWait = function() {
         if (idsToCancel.length && COMMAND_IN_FLIGHT_STATUSES.has(webState.commandStatus)) {
             idsToCancel.forEach(id => db.ref(`commands/${id}`).remove());
         }
-        db.ref(`web_states/machines/${port.machineId}/ports/${port.id}`).remove();
+        if (port.otp) {
+            db.ref(`web_states/machines/${port.machineId}/ports/${port.id}`).update({ clearedOtp: port.otp, smsSent: null, commandId: null, commandIds: null, commandStatus: null, errorMsg: null });
+        } else {
+            db.ref(`web_states/machines/${port.machineId}/ports/${port.id}`).remove();
+        }
         db.ref(`machines/${port.machineId}/ports/${port.id}/otp`).remove();
         if (port.otp) port.otp = null;
         port.smsSent = false;
