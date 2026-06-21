@@ -27,6 +27,10 @@
                     <i data-lucide="smartphone"></i>
                     Đang hoạt động
                 </a>
+                <a href="#" class="nav-item" id="nav-firefox">
+                    <i data-lucide="globe"></i>
+                    Firefox API
+                </a>
                 <a href="#" class="nav-item" id="nav-history">
                     <i data-lucide="history"></i>
                     Lịch sử OTP
@@ -52,30 +56,30 @@
             <header class="top-bar">
                 <h1 id="page-title">Quản lý Cổng SIM</h1>
                 <div class="actions">
-                    <div class="system-status"
-                        style="display: flex; align-items: center; gap: 8px; padding: 8px 16px; background: rgba(255,255,255,0.05); border: 1px solid var(--border-color); border-radius: 6px; font-size: 13px;">
-                        <div class="status-indicator online"></div>
-                        <span style="color: var(--text-main); font-weight: 500;">Đang kết nối...</span>
+                    <div id="top-bar-controls" style="display: flex; align-items: center; gap: 8px;">
+                        <div class="system-status"
+                            style="display: flex; align-items: center; gap: 8px; padding: 8px 16px; background: rgba(255,255,255,0.05); border: 1px solid var(--border-color); border-radius: 6px; font-size: 13px;">
+                            <div class="status-indicator online"></div>
+                            <span style="color: var(--text-main); font-weight: 500;">Đang kết nối...</span>
+                        </div>
+                        <button class="btn btn-secondary" onclick="manualRefresh()">
+                            <i data-lucide="refresh-cw"></i> Làm mới
+                        </button>
+                        <button class="btn btn-secondary" onclick="checkAllBalance()">
+                            <i data-lucide="wallet"></i> Kiểm tra TKC tất cả
+                        </button>
+                        <button class="btn btn-secondary" onclick="cancelAllSmsWait()">
+                            <i data-lucide="x-circle"></i> Huỷ chờ tất cả
+                        </button>
+                        <!-- NEW BUTTON -->
+                        <button class="btn btn-secondary" onclick="restoreAllHiddenPorts()">
+                            <i data-lucide="rotate-ccw"></i> Khôi phục tất cả cổng ẩn
+                        </button>
+                        <button class="btn btn-secondary" onclick="simulateIncomingOtp()">
+                            <i data-lucide="test-tube"></i> Test OTP
+                        </button>
                     </div>
-                    <button class="btn btn-secondary" onclick="manualRefresh()">
-                        <i data-lucide="refresh-cw"></i> Làm mới
-                    </button>
-                    <button class="btn btn-secondary" onclick="checkAllBalance()">
-                        <i data-lucide="wallet"></i> Kiểm tra TKC tất cả
-                    </button>
-                    <button class="btn btn-secondary" onclick="cancelAllSmsWait()">
-                        <i data-lucide="x-circle"></i> Huỷ chờ tất cả
-                    </button>
-                    <!-- NEW BUTTON -->
-                    <button class="btn btn-secondary" onclick="restoreAllHiddenPorts()">
-                        <i data-lucide="rotate-ccw"></i> Khôi phục tất cả cổng ẩn
-                    </button>
-                    <button class="btn btn-secondary" onclick="simulateIncomingOtp()">
-                        <i data-lucide="test-tube"></i> Test OTP
-                    </button>
-                    <div class="user-profile">
-                        <img src="https://ui-avatars.com/api/?name=CTV&background=0D8ABC&color=fff" alt="User">
-                    </div>
+
                 </div>
             </header>
 
@@ -93,7 +97,9 @@
                         <div class="ops-panel-header">
                             <h2 style="margin: 0;"><i data-lucide="activity"></i> Command Monitor</h2>
                             <div style="display: flex; align-items: center; gap: 8px;">
-                                <button class="btn btn-outline" style="padding: 2px 8px; font-size: 11px;" onclick="clearAllCommandResults()" title="Dọn dẹp monitor"><i data-lucide="trash-2" style="width: 12px; height: 12px; margin: 0; margin-right: 4px;"></i>Dọn</button>
+                                <button class="btn btn-outline" style="padding: 2px 8px; font-size: 11px;"
+                                    onclick="clearAllCommandResults()" title="Dọn dẹp monitor"><i data-lucide="trash-2"
+                                        style="width: 12px; height: 12px; margin: 0; margin-right: 4px;"></i>Dọn</button>
                                 <span class="panel-count" id="command-panel-count">0</span>
                             </div>
                         </div>
@@ -122,14 +128,18 @@
                     </div>
                     <div style="width: 1px; height: 24px; background: var(--border-color); margin: 0 8px;"></div>
                     <div class="form-group" style="margin-bottom: 0; display: flex; align-items: center; gap: 8px;">
-                        <label style="font-size: 13px; color: var(--text-muted); margin-bottom: 0;" for="filter-machine">Máy:</label>
-                        <select id="filter-machine" style="width: 140px; padding: 6px 12px; height: auto;" onchange="renderPorts();">
+                        <label style="font-size: 13px; color: var(--text-muted); margin-bottom: 0;"
+                            for="filter-machine">Máy:</label>
+                        <select id="filter-machine" style="width: 140px; padding: 6px 12px; height: auto;"
+                            onchange="renderPorts();">
                             <option value="">Tất cả</option>
                         </select>
                     </div>
                     <div class="form-group" style="margin-bottom: 0; display: flex; align-items: center; gap: 8px;">
-                        <label style="font-size: 13px; color: var(--text-muted); margin-bottom: 0;" for="filter-status">Trạng thái:</label>
-                        <select id="filter-status" style="width: 140px; padding: 6px 12px; height: auto;" onchange="renderPorts();">
+                        <label style="font-size: 13px; color: var(--text-muted); margin-bottom: 0;"
+                            for="filter-status">Trạng thái:</label>
+                        <select id="filter-status" style="width: 140px; padding: 6px 12px; height: auto;"
+                            onchange="renderPorts();">
                             <option value="">Tất cả</option>
                             <option value="online">Online</option>
                             <option value="offline">Offline</option>
@@ -140,8 +150,10 @@
                         </select>
                     </div>
                     <div class="form-group" style="margin-bottom: 0; display: flex; align-items: center; gap: 8px;">
-                        <label style="font-size: 13px; color: var(--text-muted); margin-bottom: 0;" for="filter-network">Nhà mạng:</label>
-                        <select id="filter-network" style="width: 130px; padding: 6px 12px; height: auto;" onchange="renderPorts();">
+                        <label style="font-size: 13px; color: var(--text-muted); margin-bottom: 0;"
+                            for="filter-network">Nhà mạng:</label>
+                        <select id="filter-network" style="width: 130px; padding: 6px 12px; height: auto;"
+                            onchange="renderPorts();">
                             <option value="">Tất cả</option>
                         </select>
                     </div>
@@ -157,7 +169,8 @@
                         <label style="font-size: 13px; color: var(--text-muted); margin-bottom: 0; cursor: pointer;"
                             for="filter-error-heavy">SIM lỗi nhiều</label>
                     </div>
-                    <button class="btn btn-success" onclick="exportActivePortsToExcel()" title="Xuất danh sách đang hoạt động ra Excel">
+                    <button class="btn btn-success" onclick="exportActivePortsToExcel()"
+                        title="Xuất danh sách đang hoạt động ra Excel">
                         <i data-lucide="download"></i> Xuất Excel SĐT/TKC
                     </button>
                 </div>
@@ -194,6 +207,73 @@
                     </div>
                     <div class="grid-body" id="history-container">
                         <!-- History rows will be generated by JS -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- FIREFOX VIEW -->
+            <div class="content-area" id="firefox-view" style="display: none;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                    <h2 style="font-family: 'Outfit', sans-serif; font-size: 20px;">Quản lý API Firefox.fun</h2>
+                    <div style="display: flex; gap: 8px;">
+                        <span id="firefox-balance"
+                            style="padding: 8px 16px; background: rgba(46, 204, 113, 0.1); color: var(--success); border-radius: 6px; font-weight: 600; border: 1px solid rgba(46, 204, 113, 0.2);">Số
+                            dư: 0 VND</span>
+                        <button class="btn btn-primary" onclick="firefoxGetPhone()">
+                            <i data-lucide="plus-circle"></i> Thuê Số Mới
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Config Panel -->
+                <div
+                    style="background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); border-radius: 8px; padding: 16px; margin-bottom: 20px;">
+                    <h3
+                        style="margin-top: 0; margin-bottom: 12px; font-size: 14px; font-weight: 600; color: var(--text-main); display: flex; align-items: center; gap: 6px;">
+                        <i data-lucide="settings" style="width: 16px; height: 16px;"></i> Cấu hình API
+                    </h3>
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px;">
+                        <div class="form-group" style="margin-bottom: 0;">
+                            <label style="font-size: 12px; color: var(--text-muted);">Base URL (Proxy)</label>
+                            <input type="text" id="ff-base-url" value="/api/firefox"
+                                placeholder="/api/firefox">
+                        </div>
+                        <div class="form-group" style="margin-bottom: 0;">
+                            <label style="font-size: 12px; color: var(--text-muted);">Token</label>
+                            <input type="text" id="ff-token" placeholder="Nhập API Token của bạn...">
+                        </div>
+                        <div class="form-group" style="margin-bottom: 0;">
+                            <label style="font-size: 12px; color: var(--text-muted);">Service ID</label>
+                            <input list="ff-services-list" id="ff-service-id" placeholder="ID dịch vụ">
+                            <datalist id="ff-services-list"></datalist>
+                        </div>
+                        <div class="form-group" style="margin-bottom: 0;">
+                            <label style="font-size: 12px; color: var(--text-muted);">Country (Mã Quốc gia)</label>
+                            <input list="ff-countries-list" id="ff-country" placeholder="Mã QG (VD: 1 hoặc vn)">
+                            <datalist id="ff-countries-list"></datalist>
+                        </div>
+                    </div>
+                    <div style="margin-top: 12px; display: flex; gap: 8px;">
+                        <button class="btn btn-outline" onclick="firefoxSaveConfig()"><i data-lucide="save"></i> Lưu cấu
+                            hình</button>
+                        <button class="btn btn-outline" onclick="firefoxCheckBalance()"><i
+                                data-lucide="dollar-sign"></i> Kiểm tra kết nối / Số dư</button>
+                        <button class="btn btn-outline" onclick="firefoxLoadServices()"><i
+                                data-lucide="list"></i> Tải Dịch vụ / Bảng giá</button>
+                    </div>
+                </div>
+
+                <!-- Grid -->
+                <div class="grid-container">
+                    <div class="grid-header">
+                        <div class="col-status" style="width: 80px;">TT</div>
+                        <div class="col-phone" style="width: 150px;">Số Điện Thoại</div>
+                        <div class="col-otp" style="flex: 1;">OTP / SMS</div>
+                        <div class="col-time" style="width: 100px;">Hết hạn</div>
+                        <div class="col-actions" style="width: 300px;">Hành Động</div>
+                    </div>
+                    <div class="grid-body" id="firefox-container">
+                        <!-- Rows will be generated by JS -->
                     </div>
                 </div>
             </div>
@@ -239,7 +319,32 @@
         </div>
     </div>
 
-
+    <!-- Firefox Send SMS Modal -->
+    <div class="modal-overlay" id="firefox-sms-modal">
+        <div class="modal">
+            <div class="modal-header">
+                <h2>Gửi SMS (Firefox API)</h2>
+                <button class="close-btn" onclick="closeModal('firefox-sms-modal')"><i data-lucide="x"></i></button>
+            </div>
+            <div class="modal-body">
+                <p>Gửi SMS từ số: <strong id="ff-sms-phone"></strong></p>
+                <input type="hidden" id="ff-sms-pkey">
+                <div class="form-group">
+                    <label>Đầu số nhận (Receiver):</label>
+                    <input type="text" id="ff-sms-receiver" placeholder="Ví dụ: 8500">
+                </div>
+                <div class="form-group">
+                    <label>Nội dung tin nhắn:</label>
+                    <input type="text" id="ff-sms-content" placeholder="Ví dụ: ZALO...">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-ghost" onclick="closeModal('firefox-sms-modal')">Hủy</button>
+                <button class="btn btn-primary" onclick="firefoxExecuteSendSms()"><i data-lucide="send"></i> Gửi
+                    SMS</button>
+            </div>
+        </div>
+    </div>
 
     <!-- Notification Toast Container -->
     <div id="toast-container" class="toast-container"></div>
