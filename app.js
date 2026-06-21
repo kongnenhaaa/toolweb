@@ -21,7 +21,7 @@ const BALANCE_WAIT_TIMEOUT_MS = 45000;
 const COMMAND_STALE_TIMEOUT_MS = 10 * 60 * 1000;
 const BALANCE_COMMAND_SPACING_MS = 1200;
 const COMMAND_IN_FLIGHT_STATUSES = new Set(['queued', 'running']);
-const COMMAND_SUCCESS_STATUSES = new Set(['sent', 'done', 'success']);
+const COMMAND_SUCCESS_STATUSES = new Set(['sent', 'done', 'success', 'maybe_sent']);
 const COMMAND_FAILED_STATUSES = new Set(['failed', 'timeout', 'error']);
 const CLIENT_SESSION_ID = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
@@ -60,6 +60,7 @@ function normalizePhoneNumber(phone) {
 function getPortUiStatus(port) {
     if (port.errorMsg) return 'error';
     if (COMMAND_IN_FLIGHT_STATUSES.has(port.commandStatus)) return 'busy';
+    if (port.commandStatus === 'maybe_sent') return 'maybe_sent';
     if (port.otp) return 'otp';
     if (port.smsSent) return 'waiting';
     return port.status === 'online' ? 'online' : 'offline';
@@ -70,6 +71,7 @@ function getPortUiStatusLabel(status) {
         online: 'Online',
         offline: 'Offline',
         waiting: 'Chờ OTP',
+        maybe_sent: 'Có thể đã gửi',
         otp: 'Có OTP',
         error: 'Lỗi',
         busy: 'Đang chạy'
@@ -243,7 +245,7 @@ function renderErrorPanel() {
                     <div class="ops-sub">${escapeHtml(err)} · TO:${port.timeoutCount || 0} SMS:${port.smsErrorCount || 0} RC:${port.reconnectCount || 0}</div>
                 </div>
                 <div class="ops-actions">
-                    <button class="btn btn-outline" onclick="cancelSmsWait('${port.id}', '${port.machineId}')">Hủy</button>
+                    <button class="btn btn-outline" onclick="cancelSmsWait('${port.id}', '${port.machineId}')">Hủy chờ OTP</button>
                     <button class="btn btn-primary" onclick="openSmsModal('${port.id}', '${port.machineId}')">Gửi lại</button>
                     <button class="btn btn-secondary" onclick="checkBalance('${port.id}', '${port.machineId}')">TKC</button>
                 </div>
@@ -352,8 +354,11 @@ function normalizeSmsError(message, fallback = 'Lệnh thất bại') {
     if (normalized.includes('het tien') || normalized.includes('khong du tien') || rawLower.includes('hết tiền')) {
         return 'Hết tiền';
     }
-    if (normalized.includes('qua thoi gian cho otp') || normalized.includes('timeout')) {
+    if (normalized.includes('qua thoi gian cho otp')) {
         return 'Quá thời gian chờ OTP';
+    }
+    if (normalized.includes('timeout') || normalized.includes('maybe_sent')) {
+        return 'Có thể đã gửi';
     }
     return raw;
 }
@@ -362,6 +367,7 @@ function getCommandStatusText(status, type = 'sms') {
     if (status === 'queued') return 'Đang xếp hàng';
     if (status === 'running') return type === 'balance' ? 'Đang kiểm tra số dư' : 'Đang gửi SMS';
     if (status === 'sent') return 'Đã gửi SMS';
+    if (status === 'maybe_sent') return 'Có thể đã gửi';
     if (status === 'done' || status === 'success') return type === 'balance' ? 'Đã kiểm tra số dư' : 'Hoàn tất';
     if (status === 'failed') return 'Lỗi';
     if (status === 'timeout') return 'Quá thời gian';
@@ -467,7 +473,7 @@ async function updateCommandStateIfCurrent(machineId, portId, commandId, payload
         && current.smsSent === true;
     if (!current.commandId && commandIds.length === 0) return false;
     if (current.commandId && current.commandId !== commandId && !isBatchCommand) return false;
-    if (!isCurrentSmsWaitTimeout && !isBatchCommand && current.commandStatus && !COMMAND_IN_FLIGHT_STATUSES.has(current.commandStatus)) return false;
+    if (!isCurrentSmsWaitTimeout && !isBatchCommand && current.commandId !== commandId && current.commandStatus && !COMMAND_IN_FLIGHT_STATUSES.has(current.commandStatus)) return false;
     await stateRef.update(payload);
     return true;
 }
@@ -706,11 +712,11 @@ function applyWebStates() {
         
         let shouldHide = false;
         let isSmsSent = webState.smsSent || false;
-        let errorMsg = isOwnWebCommand && webState.errorMsg ? normalizeSmsError(webState.errorMsg) : null;
+        let errorMsg = webState.errorMsg ? normalizeSmsError(webState.errorMsg) : null;
         const smsSentTime = webState.smsSentTime || port.smsSentTime || null;
         const activeCommandId = webState.commandId || port.commandId || null;
 
-        if (isOwnWebCommand && isSmsSent && smsSentTime && !port.otp && !errorMsg) {
+        if (isSmsSent && smsSentTime && !port.otp && !webState.errorMsg) {
             const elapsed = getServerNow() - smsSentTime;
             if (elapsed > SMS_WAIT_TIMEOUT_MS) {
                 errorMsg = normalizeSmsError('Quá thời gian chờ OTP');
@@ -906,7 +912,9 @@ function renderPorts() {
             const healthText = '';
 
             let otpContent = port.smsSent ? 
-                `<span style="color: #f39c12">Đang chờ mã... <span class="wait-timer" data-port="${port.id}" data-machine="${port.machineId}"></span></span>` : 
+                (port.commandStatus === 'maybe_sent' ?
+                    `<span style="color: #f39c12">Có thể đã gửi... <span class="wait-timer" data-port="${port.id}" data-machine="${port.machineId}"></span></span>` :
+                    `<span style="color: #f39c12">Đang chờ mã... <span class="wait-timer" data-port="${port.id}" data-machine="${port.machineId}"></span></span>`) : 
                 '<span style="color: var(--text-muted)">Chưa gửi tin nhắn</span>';
             if (!port.smsSent && commandText) {
                 otpContent = `<span style="color: var(--warning); font-weight: 600;">${escapeHtml(commandText)}</span>`;
@@ -936,7 +944,7 @@ function renderPorts() {
             } else {
                 // Luôn hiển thị button huỷ chờ
                 actionButtons += `
-                    <button class="btn btn-outline" onclick="cancelSmsWait('${port.id}', '${port.machineId}')" title="Huỷ trạng thái" style="padding: 0 8px;">
+                    <button class="btn btn-outline" onclick="cancelSmsWait('${port.id}', '${port.machineId}')" title="Hủy chờ OTP" style="padding: 0 8px;">
                         <i data-lucide="x-circle"></i>
                     </button>
                 `;
@@ -1283,7 +1291,7 @@ async function executeSendSms() {
     }
 
     if (actionPort && actionPort.smsSent && !isActionableSmsError(actionPort.errorMsg)) {
-        showToast('Cổng này đang chờ OTP, hãy huỷ trạng thái trước khi gửi lại.', 'error');
+        showToast('Cổng này đang chờ OTP, hãy hủy chờ OTP trước khi gửi lại.', 'error');
         return;
     }
 
@@ -1462,23 +1470,46 @@ window.checkBalance = async function(portId, machineId) {
     }
 }
 
-window.cancelSmsWait = function(portId, machineId) {
+async function clearCommandResults(ids) {
+    if (!Array.isArray(ids)) return;
+    const promises = [];
+    ids.forEach(id => {
+        if (!id) return;
+        delete commandResults[id];
+        delete appliedCommandResults[id];
+        promises.push(db.ref(`command_results/${id}`).remove());
+    });
+    await Promise.all(promises);
+}
+
+window.cancelSmsWait = async function(portId, machineId) {
     const stateKey = `${machineId}_${portId}`;
     const webState = globalWebStates[stateKey] || {};
     const idsToCancel = Array.isArray(webState.commandIds)
         ? webState.commandIds
         : (webState.commandId ? [webState.commandId] : []);
+        
+    const portResults = Object.keys(commandResults).filter(id => {
+        const res = commandResults[id];
+        return res && res.portId === portId && res.machineId === machineId;
+    });
+    const allIdsToCancel = [...new Set([...idsToCancel, ...portResults])];
+
+    const promises = [];
     if (idsToCancel.length && COMMAND_IN_FLIGHT_STATUSES.has(webState.commandStatus)) {
-        idsToCancel.forEach(id => db.ref(`commands/${id}`).remove());
+        idsToCancel.forEach(id => promises.push(db.ref(`commands/${id}`).remove()));
     }
+    promises.push(clearCommandResults(allIdsToCancel));
     
     const port = state.ports.find(p => p.id === portId && p.machineId === machineId);
     if (port && port.otp) {
-        db.ref(`web_states/machines/${machineId}/ports/${portId}`).update({ clearedOtp: port.otp, smsSent: null, commandId: null, commandIds: null, commandStatus: null, errorMsg: null });
+        promises.push(db.ref(`web_states/machines/${machineId}/ports/${portId}`).update({ clearedOtp: port.otp, smsSent: null, commandId: null, commandIds: null, commandStatus: null, errorMsg: null }));
     } else {
-        db.ref(`web_states/machines/${machineId}/ports/${portId}`).remove();
+        promises.push(db.ref(`web_states/machines/${machineId}/ports/${portId}`).remove());
     }
-    db.ref(`machines/${machineId}/ports/${portId}/otp`).remove();
+    promises.push(db.ref(`machines/${machineId}/ports/${portId}/otp`).remove());
+    
+    await Promise.all(promises);
     
     // Xoá OTP trên giao diện nếu đang có
     if (port) {
@@ -1491,31 +1522,40 @@ window.cancelSmsWait = function(portId, machineId) {
         renderPorts();
     }
     
-    showToast(`Đã huỷ trạng thái cho cổng ${portId} (${machineId})`);
+    showToast(`Đã hủy chờ OTP cho cổng ${portId} (${machineId})`);
 }
 
-window.cancelAllSmsWait = function() {
+window.cancelAllSmsWait = async function() {
     const visiblePorts = state.ports.filter(p => !p.hidden && !p.isTest && p.status === 'online');
     if (visiblePorts.length === 0) {
         showToast('Không có cổng nào đang hoạt động!', 'error');
         return;
     }
 
-    showToast(`Đang huỷ trạng thái chờ cho ${visiblePorts.length} cổng...`);
+    showToast(`Đang hủy chờ OTP cho ${visiblePorts.length} cổng...`);
+    const promises = [];
     visiblePorts.forEach(port => {
         const webState = globalWebStates[`${port.machineId}_${port.id}`] || {};
         const idsToCancel = Array.isArray(webState.commandIds)
             ? webState.commandIds
             : (webState.commandId ? [webState.commandId] : []);
+            
+        const portResults = Object.keys(commandResults).filter(id => {
+            const res = commandResults[id];
+            return res && res.portId === port.id && res.machineId === port.machineId;
+        });
+        const allIdsToCancel = [...new Set([...idsToCancel, ...portResults])];
+
         if (idsToCancel.length && COMMAND_IN_FLIGHT_STATUSES.has(webState.commandStatus)) {
-            idsToCancel.forEach(id => db.ref(`commands/${id}`).remove());
+            idsToCancel.forEach(id => promises.push(db.ref(`commands/${id}`).remove()));
         }
+        promises.push(clearCommandResults(allIdsToCancel));
         if (port.otp) {
-            db.ref(`web_states/machines/${port.machineId}/ports/${port.id}`).update({ clearedOtp: port.otp, smsSent: null, commandId: null, commandIds: null, commandStatus: null, errorMsg: null });
+            promises.push(db.ref(`web_states/machines/${port.machineId}/ports/${port.id}`).update({ clearedOtp: port.otp, smsSent: null, commandId: null, commandIds: null, commandStatus: null, errorMsg: null }));
         } else {
-            db.ref(`web_states/machines/${port.machineId}/ports/${port.id}`).remove();
+            promises.push(db.ref(`web_states/machines/${port.machineId}/ports/${port.id}`).remove());
         }
-        db.ref(`machines/${port.machineId}/ports/${port.id}/otp`).remove();
+        promises.push(db.ref(`machines/${port.machineId}/ports/${port.id}/otp`).remove());
         if (port.otp) port.otp = null;
         port.smsSent = false;
         port.commandId = null;
@@ -1523,8 +1563,17 @@ window.cancelAllSmsWait = function() {
         port.commandStatus = null;
         port.errorMsg = null;
     });
+    await Promise.all(promises);
     renderPorts();
-    showToast(`Đã huỷ trạng thái cho ${visiblePorts.length} cổng`);
+    showToast(`Đã hủy chờ OTP cho ${visiblePorts.length} cổng`);
+}
+
+window.clearAllCommandResults = async function() {
+    await db.ref('command_results').remove();
+    commandResults = {};
+    appliedCommandResults = {};
+    renderOperationalPanels();
+    showToast('Đã dọn sạch toàn bộ kết quả lệnh trên Firebase và giao diện.');
 }
 
 window.restoreAllHiddenPorts = function() {
@@ -1807,9 +1856,23 @@ window.onload = () => {
 
     db.ref('command_results').orderByChild('updatedAt').limitToLast(200).on('value', async (snapshot) => {
         const results = snapshot.val() || {};
+        
+        for (const id in commandResults) {
+            if (!results[id]) {
+                delete commandResults[id];
+                delete appliedCommandResults[id];
+            }
+        }
+        
         const visibleResults = { ...commandResults };
+        const now = Date.now() + serverTimeOffset;
+        const AGE_LIMIT = 30 * 60 * 1000;
 
         for (const [commandId, result] of Object.entries(results)) {
+            if (result.updatedAt && (now - result.updatedAt) > AGE_LIMIT) {
+                delete visibleResults[commandId];
+                continue;
+            }
             const signature = `${result.status || ''}_${result.updatedAt || ''}_${result.error || ''}`;
             if (appliedCommandResults[commandId] === signature) continue;
             if (await applyCommandResult(commandId, result)) {

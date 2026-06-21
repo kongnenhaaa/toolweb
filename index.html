@@ -91,8 +91,11 @@
                     </section>
                     <section class="ops-panel" id="command-ops-panel" data-drag-key="commands" draggable="true">
                         <div class="ops-panel-header">
-                            <h2><i data-lucide="activity"></i> Command Monitor</h2>
-                            <span class="panel-count" id="command-panel-count">0</span>
+                            <h2 style="margin: 0;"><i data-lucide="activity"></i> Command Monitor</h2>
+                            <div style="display: flex; align-items: center; gap: 8px;">
+                                <button class="btn btn-outline" style="padding: 2px 8px; font-size: 11px;" onclick="clearAllCommandResults()" title="Dọn dẹp monitor"><i data-lucide="trash-2" style="width: 12px; height: 12px; margin: 0; margin-right: 4px;"></i>Dọn</button>
+                                <span class="panel-count" id="command-panel-count">0</span>
+                            </div>
                         </div>
                         <div id="command-monitor-list" class="ops-list command-list"></div>
                     </section>

@@ -302,7 +302,8 @@ body::-webkit-scrollbar {
 
 .status-pill.waiting,
 .status-pill.queued,
-.status-pill.running {
+.status-pill.running,
+.status-pill.maybe_sent {
     color: var(--warning);
     background: rgba(245, 158, 11, 0.12);
     border-color: rgba(245, 158, 11, 0.28);
