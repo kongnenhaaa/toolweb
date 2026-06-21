@@ -652,11 +652,10 @@ function fetchPorts() {
             }
 
             if (newPort.otp) {
+                scheduleAutoHistory(newPort.id, newPort.machineId);
                 // Chỉ thông báo nếu không phải lần tải dữ liệu đầu tiên khi vừa mở/refresh trang web
                 if (!isInitialFirebaseLoad && (!existingPort || existingPort.otp !== newPort.otp)) {
-                    scheduleAutoHistory(newPort.id, newPort.machineId);
-                    // Thông báo khi có OTP mới
-                    // OTP mới vẫn hiển thị trên bảng, không hiện toast/âm thanh.
+                    // Có thể thêm âm thanh ở đây nếu cần
                 }
             }
         });
@@ -1526,6 +1525,26 @@ window.cancelAllSmsWait = function() {
     });
     renderPorts();
     showToast(`Đã huỷ trạng thái cho ${visiblePorts.length} cổng`);
+}
+
+window.restoreAllHiddenPorts = function() {
+    let count = 0;
+    Object.keys(globalWebStates).forEach(stateKey => {
+        const webState = globalWebStates[stateKey];
+        if (webState.hiddenOtp) {
+            const ref = globalWebStateRefs[stateKey];
+            if (ref) {
+                db.ref(`web_states/machines/${ref.machineId}/ports/${ref.portId}`).remove();
+                count++;
+            }
+        }
+    });
+    if (count > 0) {
+        showToast(`Đã khôi phục ${count} cổng ẩn.`);
+        renderPorts();
+    } else {
+        showToast('Không có cổng nào đang bị ẩn.', 'error');
+    }
 }
 
 window.checkAllBalance = async function() {
