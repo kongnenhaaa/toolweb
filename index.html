@@ -35,7 +35,7 @@
                     <i data-lucide="history"></i>
                     Lịch sử OTP
                 </a>
-                <a href="#" class="nav-item">
+                <a href="#" class="nav-item" onclick="openSettingsModal(); return false;">
                     <i data-lucide="settings"></i>
                     Cài đặt
                 </a>
@@ -54,7 +54,6 @@
         <!-- Main Content -->
         <main class="main-content">
             <header class="top-bar">
-                <h1 id="page-title">Quản lý Cổng SIM</h1>
                 <div class="actions">
                     <div id="top-bar-controls" style="display: flex; align-items: center; gap: 8px;">
                         <div class="system-status"
@@ -214,7 +213,6 @@
             <!-- FIREFOX VIEW -->
             <div class="content-area" id="firefox-view" style="display: none;">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
-                    <h2 style="font-family: 'Outfit', sans-serif; font-size: 20px;">Quản lý API Firefox.fun</h2>
                     <div style="display: flex; gap: 8px;">
                         <span id="firefox-balance"
                             style="padding: 8px 16px; background: rgba(46, 204, 113, 0.1); color: var(--success); border-radius: 6px; font-weight: 600; border: 1px solid rgba(46, 204, 113, 0.2);">Số
@@ -235,12 +233,11 @@
                     <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px;">
                         <div class="form-group" style="margin-bottom: 0;">
                             <label style="font-size: 12px; color: var(--text-muted);">Base URL (Proxy)</label>
-                            <input type="text" id="ff-base-url" value="/api/firefox"
-                                placeholder="/api/firefox">
+                            <input type="text" id="ff-base-url" value="/api/firefox" placeholder="/api/firefox">
                         </div>
                         <div class="form-group" style="margin-bottom: 0;">
                             <label style="font-size: 12px; color: var(--text-muted);">Token</label>
-                            <input type="text" id="ff-token" placeholder="Nhập API Token của bạn...">
+                            <input type="password" id="ff-token" placeholder="Nhập API Token của bạn..." oncopy="return false;" oncut="return false;" onselectstart="return false;" autocomplete="off" spellcheck="false">
                         </div>
                         <div class="form-group" style="margin-bottom: 0;">
                             <label style="font-size: 12px; color: var(--text-muted);">Service ID</label>
@@ -258,8 +255,8 @@
                             hình</button>
                         <button class="btn btn-outline" onclick="firefoxCheckBalance()"><i
                                 data-lucide="dollar-sign"></i> Kiểm tra kết nối / Số dư</button>
-                        <button class="btn btn-outline" onclick="firefoxLoadServices()"><i
-                                data-lucide="list"></i> Tải Dịch vụ / Bảng giá</button>
+                        <button class="btn btn-outline" onclick="firefoxLoadServices()"><i data-lucide="list"></i> Tải
+                            Dịch vụ / Bảng giá</button>
                     </div>
                 </div>
 
@@ -337,7 +334,8 @@
                         <option value="7539">7539 (Zalo)</option>
                         <option value="custom">Nhập số khác...</option>
                     </select>
-                    <input type="text" id="ff-sms-receiver-custom" placeholder="Ví dụ: 8088" style="display: none; margin-top: 8px;">
+                    <input type="text" id="ff-sms-receiver-custom" placeholder="Ví dụ: 8088"
+                        style="display: none; margin-top: 8px;">
                 </div>
                 <div class="form-group">
                     <label>Nội dung tin nhắn:</label>
@@ -352,19 +350,46 @@
         </div>
     </div>
 
+    <!-- Settings Modal -->
+    <div class="modal-overlay" id="settings-modal">
+        <div class="modal" style="width: 400px; max-width: 95vw;">
+            <div class="modal-header">
+                <h2>Cài đặt chung</h2>
+                <button class="close-btn" onclick="closeModal('settings-modal')"><i data-lucide="x"></i></button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group"
+                    style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 0;">
+                    <label style="margin-bottom: 0; font-size: 15px; font-weight: 500;">Âm thanh thông báo OTP</label>
+                    <label class="switch">
+                        <input type="checkbox" id="setting-sound-toggle" onchange="toggleSoundSetting(this)">
+                        <span class="slider round"></span>
+                    </label>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-primary" onclick="closeModal('settings-modal')">Đóng</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Firefox Pricing Modal -->
     <div class="modal-overlay" id="firefox-pricing-modal">
-        <div class="modal" style="width: 1000px; max-width: 95vw; max-height: 90vh; display: flex; flex-direction: column;">
+        <div class="modal"
+            style="width: 1000px; max-width: 95vw; max-height: 90vh; display: flex; flex-direction: column;">
             <div class="modal-header" style="border-bottom: none; padding-bottom: 12px;">
                 <h2>Bảng Giá / Dịch Vụ Firefox</h2>
                 <button class="close-btn" onclick="closeModal('firefox-pricing-modal')"><i data-lucide="x"></i></button>
             </div>
             <div style="padding: 0 24px 12px 24px; border-bottom: 1px solid var(--border-color);">
-                <input type="text" id="ff-pricing-search" placeholder="Tìm kiếm tên dịch vụ, ID hoặc quốc gia..." style="width: 100%; padding: 10px 12px; border: 1px solid var(--border-color); border-radius: 6px; background: rgba(0,0,0,0.2); color: var(--text-main); font-family: inherit; font-size: 14px; outline: none;">
+                <input type="text" id="ff-pricing-search" placeholder="Tìm kiếm tên dịch vụ, ID hoặc quốc gia..."
+                    style="width: 100%; padding: 10px 12px; border: 1px solid var(--border-color); border-radius: 6px; background: rgba(0,0,0,0.2); color: var(--text-main); font-family: inherit; font-size: 14px; outline: none;">
             </div>
             <div class="modal-body" style="overflow-y: auto; overflow-x: hidden; flex: 1; padding: 0;">
-                <table style="width: 100%; text-align: left; border-collapse: collapse; font-size: 13px; table-layout: auto;">
-                    <thead style="background: #1e1e2d; position: sticky; top: 0; z-index: 10; box-shadow: 0 1px 0 var(--border-color);">
+                <table
+                    style="width: 100%; text-align: left; border-collapse: collapse; font-size: 13px; table-layout: auto;">
+                    <thead
+                        style="background: #1e1e2d; position: sticky; top: 0; z-index: 10; box-shadow: 0 1px 0 var(--border-color);">
                         <tr>
                             <th style="padding: 12px 16px;">ID</th>
                             <th style="padding: 12px 16px;">Dịch vụ</th>

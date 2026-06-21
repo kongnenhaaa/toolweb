@@ -15,6 +15,7 @@ let autoHistoryTimeouts = {};
 let commandResults = {};
 let appliedCommandResults = {};
 let sendingSmsPorts = new Set();
+let soundEnabled = localStorage.getItem('gsm_sound_enabled') !== 'false'; // default true
 
 const SMS_WAIT_TIMEOUT_MS = 120000;
 const BALANCE_WAIT_TIMEOUT_MS = 45000;
@@ -569,6 +570,7 @@ function scheduleAutoHistory(portId, machineId) {
 
 // Âm thanh thông báo OTP (Web Audio API - không cần file ngoài)
 function playNotificationSound() {
+    if (!soundEnabled) return;
     try {
         const ctx = new (window.AudioContext || window.webkitAudioContext)();
 
@@ -1255,6 +1257,19 @@ function toggleCustomRecipient() {
     }
 }
 
+function openSettingsModal() {
+    document.getElementById('setting-sound-toggle').checked = soundEnabled;
+    document.getElementById('settings-modal').classList.add('active');
+}
+
+function toggleSoundSetting(checkbox) {
+    soundEnabled = checkbox.checked;
+    localStorage.setItem('gsm_sound_enabled', soundEnabled);
+    if (soundEnabled) {
+        playNotificationSound();
+    }
+}
+
 function closeModal(modalId) {
     document.getElementById(modalId).classList.remove('active');
     state.currentActionPortId = null;
@@ -1805,9 +1820,48 @@ document.getElementById('nav-active').addEventListener('click', (e) => {
     const topBarControls = document.getElementById('top-bar-controls');
     if (topBarControls) topBarControls.style.display = 'flex';
 
-    document.getElementById('page-title').textContent = 'Quản lý Cổng SIM';
     renderPorts();
 });
+
+async function reloadHistoryAndRender() {
+    const container = document.getElementById('history-container');
+    if (container) {
+        container.innerHTML = `<div style="padding:40px;color:var(--text-muted);">Đang tải lịch sử OTP...</div>`;
+    }
+
+    try {
+        const snapshot = await db.ref('history')
+            .orderByChild('timestamp')
+            .limitToLast(500)
+            .once('value');
+
+        const data = snapshot.val();
+
+        const firebaseHistory = data
+            ? Object.entries(data).map(([key, value]) => ({
+                ...value,
+                phone: value?.phone ? normalizePhoneNumber(value.phone) : value?.phone,
+                fbKey: key
+            }))
+            : [];
+
+        let localHistory = [];
+        try {
+            localHistory = JSON.parse(localStorage.getItem('gsm_history') || '[]');
+            if (!Array.isArray(localHistory)) localHistory = [];
+        } catch {
+            localHistory = [];
+        }
+
+        state.history = [...firebaseHistory, ...localHistory];
+        renderHistory();
+    } catch (error) {
+        console.error('Lỗi tải lại history:', error);
+        if (container) {
+            container.innerHTML = `<div style="padding:40px;color:var(--danger);">Lỗi tải lịch sử OTP: ${escapeHtml(error.message)}</div>`;
+        }
+    }
+}
 
 document.getElementById('nav-history').addEventListener('click', (e) => {
     e.preventDefault();
@@ -1825,7 +1879,7 @@ document.getElementById('nav-history').addEventListener('click', (e) => {
     if (topBarControls) topBarControls.style.display = 'none';
 
     document.getElementById('page-title').textContent = 'Lịch sử OTP';
-    renderHistory();
+    reloadHistoryAndRender();
 });
 
 const navFirefoxBtn = document.getElementById('nav-firefox');
@@ -1870,25 +1924,47 @@ window.onload = () => {
         });
     }
 
-    // Load history từ Firebase (lấy 200 bản ghi gần nhất để tránh lag)
-    db.ref('history').orderByChild('timestamp').limitToLast(200).on('value', (snapshot) => {
-        const data = snapshot.val();
-        if (data) {
-            state.history = Object.entries(data).map(([key, value]) => ({
-                ...value,
-                phone: value?.phone ? normalizePhoneNumber(value.phone) : value?.phone,
-                fbKey: key
-            }));
-        } else {
-            state.history = [];
-        }
-        if (document.getElementById('history-view').style.display === 'flex') {
+    // Load history từ Firebase và kết hợp với local
+    const renderHistorySafe = () => {
+        const view = document.getElementById('history-view');
+        if (view && view.style.display !== 'none') {
             renderHistory();
         }
+    };
 
-        // Gọi lại applyWebStates để lập tức ẩn các số vừa vào lịch sử
-        applyWebStates();
-    });
+    db.ref('history')
+      .orderByChild('timestamp')
+      .limitToLast(500)
+      .on('value', (snapshot) => {
+          const data = snapshot.val();
+
+          const firebaseHistory = data
+              ? Object.entries(data).map(([key, value]) => ({
+                  ...value,
+                  phone: value?.phone ? normalizePhoneNumber(value.phone) : value?.phone,
+                  fbKey: key
+              }))
+              : [];
+
+          let localHistory = [];
+          try {
+              localHistory = JSON.parse(localStorage.getItem('gsm_history') || '[]');
+              if (!Array.isArray(localHistory)) localHistory = [];
+          } catch {
+              localHistory = [];
+          }
+
+          state.history = [...firebaseHistory, ...localHistory];
+
+          renderHistorySafe();
+          applyWebStates();
+      }, (error) => {
+          console.error('Lỗi tải history:', error);
+          const container = document.getElementById('history-container');
+          if (container) {
+              container.innerHTML = `<div style="padding:40px;color:var(--danger);">Lỗi tải lịch sử OTP: ${escapeHtml(error.message)}</div>`;
+          }
+      });
 
     db.ref('command_results').orderByChild('updatedAt').limitToLast(200).on('value', async (snapshot) => {
         const results = snapshot.val() || {};
@@ -2118,6 +2194,10 @@ window.firefoxCheckBalance = async function () {
             const balEl = document.getElementById('firefox-balance');
             if (balEl) balEl.textContent = `Số dư: ${parts[1]} VND`;
             showToast(`Kết nối thành công. Số dư: ${parts[1]} VND`);
+        } else if (res === '0|-3') {
+            showToast('Lỗi: Thao tác quá nhanh, vui lòng đợi 60s trước khi kiểm tra lại.', 'error');
+        } else if (res === '0|-1' || res === '0|-2') {
+            showToast('Lỗi: Token không hợp lệ hoặc đã hết hạn.', 'error');
         } else {
             showToast(`Lỗi kiểm tra số dư: ${res}`, 'error');
         }
@@ -2155,6 +2235,17 @@ window.firefoxGetPhone = async function () {
             });
             saveFirefoxPorts();
             showToast(`Thuê số thành công: ${mobile}`);
+        } else if (parts[0] === '0') {
+            const errCode = parts[1];
+            let errorMsg = `Lỗi thuê số (Mã ${errCode})`;
+            switch (errCode) {
+                case '-1': errorMsg = 'Đã hết số cho dịch vụ này'; break;
+                case '-3': errorMsg = 'ID Dịch vụ không đúng'; break;
+                case '-4': errorMsg = 'Mã quốc gia không đúng'; break;
+                case '-8': errorMsg = 'Tài khoản không đủ tiền'; break;
+                case '-9': errorMsg = 'Thuê quá nhiều số cùng lúc, vui lòng thử lại sau'; break;
+            }
+            showToast(errorMsg, 'error');
         } else {
             showToast(`Lỗi thuê số: ${res}`, 'error');
         }
@@ -2162,6 +2253,14 @@ window.firefoxGetPhone = async function () {
 }
 
 window.firefoxSetRel = async function (pkey) {
+    const port = state.firefoxPorts.find(p => p.pkey === pkey);
+    if (port) {
+        port.status = 'releasing';
+        saveFirefoxPorts();
+        // Cập nhật UI ngay lập tức
+        if (typeof renderFirefoxPorts === 'function') renderFirefoxPorts();
+    }
+
     const res = await callFirefoxApi({ act: 'setRel', pkey: pkey });
     if (res && res.startsWith('1|')) {
         state.firefoxPorts = state.firefoxPorts.filter(p => p.pkey !== pkey);
@@ -2171,16 +2270,22 @@ window.firefoxSetRel = async function (pkey) {
         const errCode = res.split('|')[1];
         if (!isNaN(errCode) && parseInt(errCode) > 0) {
             showToast(`Bạn phải chờ ${errCode} giây nữa mới được huỷ số này!`, 'error');
-            const port = state.firefoxPorts.find(p => p.pkey === pkey);
-            if (port && port.status === 'releasing_failed') {
-                port.status = 'waiting';
-                port.expireTime = Date.now() + (parseInt(errCode) + 1) * 1000;
+            const portToUpdate = state.firefoxPorts.find(p => p.pkey === pkey);
+            if (portToUpdate) {
+                portToUpdate.status = 'waiting';
+                portToUpdate.expireTime = Date.now() + (parseInt(errCode) + 1) * 1000;
                 saveFirefoxPorts();
             }
             return;
         }
+        
+        let confirmMsg = `Hệ thống báo lỗi: ${res}\nBạn có muốn bắt buộc xoá số này khỏi màn hình không?\n(Lưu ý: Số vẫn có thể bị tính phí nếu API chưa Huỷ thành công)`;
+        if (errCode === '-4') {
+            confirmMsg = `Hệ thống báo lỗi: 0|-4 (Lỗi: Số này đã nhận được tin nhắn từ tổng đài, API không cho phép huỷ/hoàn tiền nữa).\nBạn có muốn bắt buộc xoá số này khỏi màn hình không?`;
+        }
+
         showToast(`Lỗi huỷ số: ${res}`, 'error');
-        if (confirm(`Hệ thống báo lỗi: ${res}\nBạn có muốn bắt buộc xoá số này khỏi màn hình không?\n(Lưu ý: Số vẫn có thể bị tính phí nếu API chưa Huỷ thành công)`)) {
+        if (confirm(confirmMsg)) {
             state.firefoxPorts = state.firefoxPorts.filter(p => p.pkey !== pkey);
             saveFirefoxPorts();
         }
@@ -2200,8 +2305,17 @@ window.firefoxAddBlack = async function (pkey) {
         saveFirefoxPorts();
         showToast(`Đã Blacklist số pkey ${pkey}`);
     } else {
-        showToast(`Lỗi Blacklist: ${res}`, 'error');
-        if (confirm(`Hệ thống báo lỗi: ${res}\nBạn có muốn bắt buộc xoá số này khỏi màn hình không?`)) {
+        let errorMsg = `Lỗi Blacklist: ${res}`;
+        if (res && res.startsWith('0|')) {
+            const errCode = res.split('|')[1];
+            switch (errCode) {
+                case '-1': errorMsg = 'Token lỗi hoặc hết hạn'; break;
+                case '-2': errorMsg = 'PKey không hợp lệ hoặc đã hết hạn'; break;
+                case '-3': errorMsg = 'Không thể Blacklist số này'; break;
+            }
+        }
+        showToast(errorMsg, 'error');
+        if (confirm(`Hệ thống báo: ${errorMsg}\nBạn có muốn bắt buộc xoá số này khỏi màn hình không?`)) {
             state.firefoxPorts = state.firefoxPorts.filter(p => p.pkey !== pkey);
             saveFirefoxPorts();
         }
@@ -2224,7 +2338,18 @@ window.firefoxSetAgain = async function (pkey) {
             showToast('Đã chuyển số về trạng thái Đang chờ để nhận OTP tiếp theo!');
         }
     } else {
-        showToast(`Lỗi dùng lại số: ${res}`, 'error');
+        let errorMsg = `Lỗi dùng lại số: ${res}`;
+        if (res && res.startsWith('0|')) {
+            const errCode = res.split('|')[1];
+            switch (errCode) {
+                case '-1': errorMsg = 'Token lỗi hoặc hết hạn'; break;
+                case '-2': errorMsg = 'PKey không hợp lệ hoặc đã huỷ'; break;
+                case '-3': errorMsg = 'Không tìm thấy số để dùng lại'; break;
+                case '-4': errorMsg = 'Số đang bị khoá hoặc không thể nhận SMS'; break;
+                case '-8': errorMsg = 'Không đủ tiền để dùng lại số'; break;
+            }
+        }
+        showToast(errorMsg, 'error');
     }
 }
 
@@ -2242,11 +2367,43 @@ window.firefoxApiReturn = async function (pkey) {
     if (res && res.startsWith('1|')) {
         showToast('Gửi Feedback thành công!');
     } else {
-        showToast(`Lỗi Feedback: ${res}`, 'error');
+        let errorMsg = `Lỗi Feedback: ${res}`;
+        if (res && res.startsWith('0|')) {
+            const errCode = res.split('|')[1];
+            switch (errCode) {
+                case '-1': errorMsg = 'Token lỗi hoặc hết hạn'; break;
+                case '-2': errorMsg = 'PKey không hợp lệ'; break;
+            }
+        }
+        showToast(errorMsg, 'error');
     }
 }
 
 let isFirefoxPolling = false;
+
+function translateFirefoxReply(text) {
+    if (!text) return text;
+    let translated = text;
+    const dict = {
+        '短信发送成功': 'Gửi SMS thành công',
+        '发送成功': 'Gửi thành công',
+        '发送中': 'Đang gửi',
+        '失败': 'Thất bại',
+        '成功': 'Thành công',
+        '等待接收': 'Đang chờ nhận mã'
+    };
+    for (const [zh, vi] of Object.entries(dict)) {
+        translated = translated.replace(new RegExp(zh, 'g'), vi);
+    }
+    return translated;
+}
+
+function extractFirefoxOtp(code, smsText) {
+    const joined = `${code || ''} ${smsText || ''}`;
+    const match = joined.match(/\b\d{4,8}\b/);
+    return match ? match[0] : '';
+}
+
 async function pollFirefoxOtps() {
     if (isFirefoxPolling) return;
     isFirefoxPolling = true;
@@ -2259,7 +2416,7 @@ async function pollFirefoxOtps() {
             const port = state.firefoxPorts[i];
 
             // Tự động Release nếu quá hạn
-            if (port.status === 'waiting' && now > port.expireTime) {
+            if ((port.status === 'waiting' || port.status === 'waiting_receipt') && now > port.expireTime) {
                 port.status = 'releasing';
                 hasChanges = true;
 
@@ -2303,37 +2460,136 @@ async function pollFirefoxOtps() {
                 continue;
             }
 
-            if (port.status === 'waiting') {
+            if (port.status === 'waiting' || port.status === 'waiting_receipt') {
                 const res = await callFirefoxApi({ act: 'getPhoneCode', pkey: port.pkey });
                 if (res) {
                     const parts = res.split('|');
                     if (parts[0] === '1' && parts[1]) {
-                        port.status = 'otp';
-                        port.otp = parts[1];
-                        port.smsContent = parts.slice(2).join('|');
+                        const code = String(parts[1] || '').trim();
+                        const smsText = parts.slice(2).join('|').trim();
+                        
+                        const translatedCode = translateFirefoxReply(code);
+                        const translatedSmsText = translateFirefoxReply(smsText);
 
-                        // Lưu vào History
-                        const historyKey = `FIREFOX_${port.pkey}_${Date.now()}`;
-                        const historyRef = db.ref(`history/${historyKey}`);
-                        historyRef.set({
-                            id: `FF_${port.pkey.slice(0, 5)}`,
-                            machineId: 'FIREFOX_API',
-                            phone: port.phone,
-                            otp: port.otp,
-                            usedTime: new Date().toLocaleTimeString('vi-VN'),
-                            timestamp: firebase.database.ServerValue.TIMESTAMP
-                        });
+                        port.lastReply = translatedSmsText || translatedCode;
+                        port.lastReplyAt = Date.now();
 
-                        hasChanges = true;
-                        playNotificationSound();
-                        showToast(`Có OTP mới cho số ${port.phone}: ${port.otp}`);
+                        const otp = extractFirefoxOtp(code, smsText);
+
+                        const isSendReceipt =
+                            code.includes('发送成功') ||
+                            smsText.includes('发送成功') ||
+                            smsText.includes('短信发送成功');
+
+                        if (isSendReceipt) {
+                            if (port.status === 'waiting_receipt') {
+                                port.lastStatus = 'SMS đã gửi thành công, đang lấy lại số...';
+                                port.smsContent = port.lastReply;
+                                hasChanges = true;
+
+                                const config = getFirefoxConfig();
+                                callFirefoxApi({
+                                    act: 'getPhone',
+                                    iid: config.serviceId,
+                                    country: config.country || 'vn',
+                                    mobile: port.phone
+                                }).then(reuseRes => {
+                                    if (reuseRes && reuseRes.startsWith('1|')) {
+                                        const newPkey = reuseRes.split('|')[1];
+                                        if (newPkey) {
+                                            port.pkey = newPkey;
+                                            port.status = 'waiting';
+                                            port.lastStatus = 'Đã lấy lại số, đang chờ OTP';
+                                            port.expireTime = Date.now() + 5 * 60 * 1000;
+                                            saveFirefoxPorts();
+                                            showToast('Đã lấy lại số thành công. Đang chờ OTP...');
+                                        }
+                                    } else {
+                                        port.lastStatus = `Lỗi lấy lại số: ${reuseRes}`;
+                                        saveFirefoxPorts();
+                                        showToast(`Gửi SMS thành công, nhưng lấy lại số lỗi: ${reuseRes}`, 'error');
+                                    }
+                                });
+                            } else {
+                                port.lastStatus = 'SMS đã gửi thành công, đang chờ OTP';
+                                port.smsContent = port.lastReply;
+                                hasChanges = true;
+                            }
+                            continue;
+                        }
+
+                        if (otp) {
+                            port.status = 'otp';
+                            port.otp = otp;
+                            port.smsContent = port.lastReply;
+
+                            // Lưu vào History
+                            try {
+                                const historyKey = `FIREFOX_${port.pkey}_${Date.now()}`;
+                                const historyRef = db.ref(`history/${historyKey}`);
+                                await historyRef.set({
+                                    id: `FF_${port.pkey.slice(0, 5)}`,
+                                    machineId: 'FIREFOX_API',
+                                    phone: port.phone,
+                                    otp: port.otp,
+                                    usedTime: new Date().toLocaleTimeString('vi-VN'),
+                                    timestamp: firebase.database.ServerValue.TIMESTAMP
+                                });
+                            } catch (err) {
+                                console.error('Lỗi lưu Firebase:', err);
+                                showToast(`Lỗi lưu lịch sử OTP lên hệ thống: ${err.message}`, 'error');
+                            }
+
+                            hasChanges = true;
+                            playNotificationSound();
+                            showToast(`Có OTP mới cho số ${port.phone}: ${port.otp}`);
+                        } else {
+                            port.lastStatus = `Phản hồi chưa có OTP: ${code}`;
+                            port.smsContent = smsText;
+                            hasChanges = true;
+                            continue;
+                        }
                     } else if (parts[0] === '0') {
                         const errCode = parts[1];
-                        if (errCode === '-2' || errCode === '-4' || errCode === '-5') {
-                            port.status = 'releasing_failed';
-                            port.lastError = `Lỗi tổng đài: ${errCode} (Số chết/block)`;
+
+                        if (errCode === '-3') {
+                            port.lastStatus = 'Chưa nhận được SMS/OTP, sẽ kiểm tra lại sau 5 giây';
+                            port.lastReply = 'Đang chờ verification code';
+                            port.lastReplyAt = Date.now();
                             hasChanges = true;
+                            continue;
                         }
+
+                        if (errCode === '-1') {
+                            port.status = 'releasing_failed';
+                            port.lastError = 'Token không tồn tại hoặc không hợp lệ';
+                            hasChanges = true;
+                            continue;
+                        }
+
+                        if (errCode === '-2') {
+                            port.status = 'releasing_failed';
+                            port.lastError = 'PKey không hợp lệ';
+                            hasChanges = true;
+                            continue;
+                        }
+
+                        if (errCode === '-4') {
+                            port.status = 'releasing_failed';
+                            port.lastError = 'Số không khả dụng, nên bỏ số này';
+                            hasChanges = true;
+                            continue;
+                        }
+
+                        if (errCode === '-5') {
+                            port.status = 'releasing_failed';
+                            port.lastError = 'Số đã bị black, nên bỏ số này';
+                            hasChanges = true;
+                            continue;
+                        }
+
+                        port.lastStatus = `Lỗi getPhoneCode: ${res}`;
+                        hasChanges = true;
                     }
                 }
             }
@@ -2408,8 +2664,14 @@ window.renderFirefoxPorts = function () {
         let otpContent = '';
         if (port.status === 'waiting' || port.status === 'releasing') {
             otpContent = `<span style="color: #f39c12">Đang chờ mã...</span>`;
+            if (port.lastReply) {
+                otpContent += `<br><span style="font-size:11px;color:var(--text-muted);">Phản hồi: ${escapeHtml(port.lastReply)}</span>`;
+            }
         } else if (port.status === 'releasing_failed') {
             otpContent = `<span style="color: #e74c3c">Lỗi tự động huỷ: ${escapeHtml(port.lastError || 'Unknown')}</span>`;
+            if (port.lastReply) {
+                otpContent += `<br><span style="font-size:11px;color:var(--text-muted);">Phản hồi: ${escapeHtml(port.lastReply)}</span>`;
+            }
         } else {
             otpContent = `<span class="otp-badge">${escapeHtml(port.otp)}</span> <br><span style="font-size:11px;color:gray;">${escapeHtml(port.smsContent)}</span>`;
         }
@@ -2450,6 +2712,9 @@ window.renderFirefoxPorts = function () {
                     <button class="btn btn-outline" onclick="firefoxSetRel('${port.pkey}')" title="Thử huỷ lại">
                         <i data-lucide="refresh-cw"></i> Thử lại
                     </button>
+                    <button class="btn btn-outline" onclick="firefoxAddBlack('${port.pkey}')" title="Blacklist nếu lỗi (Bỏ số)">
+                        <i data-lucide="slash"></i> Báo lỗi
+                    </button>
                     <button class="btn btn-outline" onclick="firefoxClosePort('${port.pkey}')" title="Bỏ qua">
                         <i data-lucide="x"></i> Bỏ qua
                     </button>
@@ -2458,7 +2723,7 @@ window.renderFirefoxPorts = function () {
 
         row.innerHTML = `
             <div class="col-status" style="width: 80px;">${statusDot}</div>
-            <div class="col-phone" style="width: 150px;">${escapeHtml(port.phone)}</div>
+            <div class="col-phone" style="width: 150px;">${escapeHtml(normalizePhoneNumber(port.phone))}</div>
             <div class="col-otp" style="flex: 1;">${otpContent}</div>
             <div class="col-time" style="width: 100px;">${timeText}</div>
             <div class="col-actions" style="width: 300px;">
@@ -2482,30 +2747,27 @@ window.firefoxClosePort = function (pkey) {
 window.firefoxOpenSmsModal = function (pkey, phone) {
     document.getElementById('ff-sms-pkey').value = pkey;
     document.getElementById('ff-sms-phone').textContent = phone;
-    
+
     const select = document.getElementById('ff-sms-receiver-select');
     const customInput = document.getElementById('ff-sms-receiver-custom');
-    
-    if (select.value === 'custom') {
-        // keep custom input visible if already selected
-    } else {
-        customInput.value = '';
-        customInput.style.display = 'none';
-    }
-    
+
+    select.value = '8500';
+    customInput.value = '';
+    customInput.style.display = 'none';
+
     document.getElementById('ff-sms-content').value = 'ZALO';
     document.getElementById('firefox-sms-modal').classList.add('active');
 }
 
 window.firefoxExecuteSendSms = async function () {
     const pkey = document.getElementById('ff-sms-pkey').value;
-    
+
     let receiver = document.getElementById('ff-sms-receiver-select').value;
     if (receiver === 'custom') {
         receiver = document.getElementById('ff-sms-receiver-custom').value;
     }
     receiver = (receiver || '').trim();
-    
+
     const content = document.getElementById('ff-sms-content').value.trim();
 
     if (!receiver || !content) {
@@ -2526,58 +2788,97 @@ window.firefoxExecuteSendSms = async function () {
     });
 
     if (res && res.startsWith('1|')) {
-        showToast('Đã gửi lệnh SMS Outbound thành công! Đang chờ phản hồi...');
+        showToast('Đã gửi lệnh SMS thành công. Đang chờ xác nhận từ tổng đài...');
+
+        const port = state.firefoxPorts.find(p => p.pkey === pkey);
+
+        if (port?.phone) {
+            port.status = 'waiting_receipt';
+            port.lastStatus = 'Đang chờ biên lai gửi SMS...';
+            port.lastReplyAt = Date.now();
+            saveFirefoxPorts();
+        }
+
         closeModal('firefox-sms-modal');
-        // Vẫn tiếp tục poll getPhoneCode như bình thường để nhận reply/receipt
     } else {
-        showToast(`Lỗi gửi SMS: ${res}`, 'error');
+        let errorMsg = `Lỗi gửi SMS: ${res}`;
+        if (res && res.startsWith('0|')) {
+            const errCode = res.split('|')[1];
+            switch (errCode) {
+                case '-1': errorMsg = 'Token lỗi (Không tồn tại hoặc hết hạn)'; break;
+                case '-2': errorMsg = 'PKey không hợp lệ hoặc đã huỷ/hết hạn'; break;
+                case '-3': errorMsg = 'Chưa có thông tin'; break;
+                case '-4': errorMsg = 'Số không khả dụng (nên bỏ số)'; break;
+                case '-5': errorMsg = 'Số đã bị Blacklist (nên bỏ số)'; break;
+                case '-6':
+                case '-7': errorMsg = `Số không gửi được SMS (Mã ${errCode}, nên bỏ số)`; break;
+                case '-8': errorMsg = 'Dịch vụ này không hỗ trợ gửi SMS (Lỗi -8)'; break;
+                case '-10': errorMsg = 'Nội dung SMS không đúng định dạng cho phép'; break;
+                case '-11': errorMsg = 'Lỗi gửi trùng lặp nội dung'; break;
+                default: errorMsg = `Lỗi gửi SMS (Mã: ${errCode})`; break;
+            }
+        }
+        showToast(errorMsg, 'error');
     }
 }
 
-window.firefoxLoadServices = async function () {
+function processFirefoxServices(items) {
+    const servicesMap = new Map();
+    const countriesMap = new Map();
+
+    items.forEach(item => {
+        servicesMap.set(item.Item_ID, `${item.Item_Name} - ${item.Item_UPrice} VND`);
+        if (item.Country_ID) {
+            countriesMap.set(item.Country_ID, item.Country_Title);
+        }
+    });
+
+    const srvDataList = document.getElementById('ff-services-list');
+    if (srvDataList) {
+        srvDataList.innerHTML = '';
+        servicesMap.forEach((name, id) => {
+            const opt = document.createElement('option');
+            opt.value = id;
+            opt.textContent = `${name}`;
+            srvDataList.appendChild(opt);
+        });
+    }
+
+    const countryDataList = document.getElementById('ff-countries-list');
+    if (countryDataList) {
+        countryDataList.innerHTML = '';
+        countriesMap.forEach((name, id) => {
+            const opt = document.createElement('option');
+            opt.value = id;
+            opt.textContent = `${name}`;
+            countryDataList.appendChild(opt);
+        });
+    }
+
+    window.ffGlobalPricingData = items;
+    renderFirefoxPricingTable(items);
+}
+
+window.firefoxLoadServices = async function (force = false) {
+    const cached = localStorage.getItem('ff_services_cache');
+    if (cached && !force) {
+        try {
+            const items = JSON.parse(cached);
+            processFirefoxServices(items);
+            document.getElementById('firefox-pricing-modal').classList.add('active');
+            showToast('Đã mở bảng giá (từ bộ nhớ tạm)!');
+            return;
+        } catch(e) {}
+    }
+
     showToast('Đang tải danh sách dịch vụ...');
     try {
         const res = await callFirefoxApi({ act: 'getItem', key: '' });
         if (res && res.startsWith('[')) {
             const items = JSON.parse(res);
-
-            // Generate datalist for services
-            const servicesMap = new Map();
-            const countriesMap = new Map();
-
-            items.forEach(item => {
-                servicesMap.set(item.Item_ID, `${item.Item_Name} - ${item.Item_UPrice} VND`);
-                if (item.Country_ID) {
-                    countriesMap.set(item.Country_ID, item.Country_Title);
-                }
-            });
-
-            const srvDataList = document.getElementById('ff-services-list');
-            if (srvDataList) {
-                srvDataList.innerHTML = '';
-                servicesMap.forEach((name, id) => {
-                    const opt = document.createElement('option');
-                    opt.value = id;
-                    opt.textContent = `${name}`;
-                    srvDataList.appendChild(opt);
-                });
-            }
-
-            const countryDataList = document.getElementById('ff-countries-list');
-            if (countryDataList) {
-                countryDataList.innerHTML = '';
-                countriesMap.forEach((name, id) => {
-                    const opt = document.createElement('option');
-                    opt.value = id;
-                    opt.textContent = `${name}`;
-                    countryDataList.appendChild(opt);
-                });
-            }
-
-            window.ffGlobalPricingData = items;
-            renderFirefoxPricingTable(items);
+            localStorage.setItem('ff_services_cache', JSON.stringify(items));
+            processFirefoxServices(items);
             document.getElementById('firefox-pricing-modal').classList.add('active');
-
             showToast('Tải danh sách dịch vụ và bảng giá thành công!');
         } else {
             showToast(`Lỗi tải danh sách: ${res}`, 'error');
