@@ -556,7 +556,7 @@ function scheduleAutoHistory(portId, machineId) {
     if (autoHistoryTimeouts[timeoutKey]) {
         clearTimeout(autoHistoryTimeouts[timeoutKey]);
     }
-    
+
     // Tự động chuyển qua lịch sử sau 20 giây
     autoHistoryTimeouts[timeoutKey] = setTimeout(() => {
         const port = state.ports.find(p => p.id === portId && p.machineId === machineId);
@@ -571,7 +571,7 @@ function scheduleAutoHistory(portId, machineId) {
 function playNotificationSound() {
     try {
         const ctx = new (window.AudioContext || window.webkitAudioContext)();
-        
+
         // Beep 1
         const osc1 = ctx.createOscillator();
         const gain1 = ctx.createGain();
@@ -583,7 +583,7 @@ function playNotificationSound() {
         gain1.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.15);
         osc1.start(ctx.currentTime);
         osc1.stop(ctx.currentTime + 0.15);
-        
+
         // Beep 2 (cao hơn, sau 0.18s)
         const osc2 = ctx.createOscillator();
         const gain2 = ctx.createGain();
@@ -595,7 +595,7 @@ function playNotificationSound() {
         gain2.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.4);
         osc2.start(ctx.currentTime + 0.18);
         osc2.stop(ctx.currentTime + 0.4);
-    } catch (e) {}
+    } catch (e) { }
 }
 
 // Firebase configuration
@@ -606,7 +606,7 @@ firebase.initializeApp(firebaseConfig);
 const db = firebase.database();
 
 // Lấy độ lệch thời gian giữa Client và Firebase Server
-db.ref('.info/serverTimeOffset').on('value', function(snapshot) {
+db.ref('.info/serverTimeOffset').on('value', function (snapshot) {
     serverTimeOffset = snapshot.val() || 0;
 });
 
@@ -618,18 +618,18 @@ function fetchPorts() {
         const machinesData = snapshot.val();
         let allPorts = [];
         const now = Date.now() + serverTimeOffset;
-        
+
         if (machinesData) {
             // Duyệt qua từng máy tính
             Object.keys(machinesData).forEach(machineId => {
                 const machineNode = machinesData[machineId];
-                
+
                 let lastSync = 0;
                 if (machineNode.server_status && machineNode.server_status.lastSync) {
                     lastSync = machineNode.server_status.lastSync;
                     lastSyncByMachine[machineId] = lastSync;
                 }
-                
+
                 // Chỉ lấy cổng của những máy tính đang sống (cập nhật trong 15s gần nhất)
                 if (now - lastSync <= 15000) {
                     if (machineNode.ports) {
@@ -640,7 +640,7 @@ function fetchPorts() {
                 }
             });
         }
-        
+
         allPorts.forEach(newPort => {
             if (newPort.phone) {
                 newPort.phone = normalizePhoneNumber(newPort.phone);
@@ -665,13 +665,13 @@ function fetchPorts() {
                 }
             }
         });
-        
+
         isInitialFirebaseLoad = false;
-        
+
         // Retain locally created test ports
         const testPorts = state.ports.filter(p => p.isTest);
         state.ports = [...allPorts, ...testPorts];
-        
+
         applyWebStates();
     }, (error) => {
         console.error('Lỗi khi tải dữ liệu từ Firebase:', error);
@@ -709,7 +709,7 @@ function applyWebStates() {
         const stateKey = `${port.machineId}_${port.id}`;
         const webState = globalWebStates[stateKey] || {};
         const isOwnWebCommand = webState.reservedBy === CLIENT_SESSION_ID;
-        
+
         let shouldHide = false;
         let isSmsSent = webState.smsSent || false;
         let errorMsg = webState.errorMsg ? normalizeSmsError(webState.errorMsg) : null;
@@ -746,7 +746,7 @@ function applyWebStates() {
                 shouldHide = false;
                 isSmsSent = false;
                 errorMsg = null;
-            } 
+            }
             // Ktra xem C# có cập nhật OTP mới không?
             else if (port.otp && port.otp !== webState.hiddenOtp) {
                 db.ref(`web_states/machines/${port.machineId}/ports/${port.id}`).remove();
@@ -816,19 +816,19 @@ function getVisibleActivePorts() {
     const part = parseInt(partStr) || 1;
 
     let myAssignedPorts = allPorts;
-    
+
     if (workers > 1) {
         // Divide total hardware ports
         const totalPorts = allPorts.length;
         const portsPerPerson = Math.floor(totalPorts / workers);
         const remainder = totalPorts % workers;
-        
+
         let startIndex = 0;
         for (let i = 1; i < part; i++) {
             startIndex += portsPerPerson + (i <= remainder ? 1 : 0);
         }
         const count = portsPerPerson + (part <= remainder ? 1 : 0);
-        
+
         myAssignedPorts = allPorts.slice(startIndex, startIndex + count);
     }
 
@@ -911,10 +911,10 @@ function renderPorts() {
             const isCommandBusy = COMMAND_IN_FLIGHT_STATUSES.has(port.commandStatus);
             const healthText = '';
 
-            let otpContent = port.smsSent ? 
+            let otpContent = port.smsSent ?
                 (port.commandStatus === 'maybe_sent' ?
                     `<span style="color: #f39c12">Có thể đã gửi... <span class="wait-timer" data-port="${port.id}" data-machine="${port.machineId}"></span></span>` :
-                    `<span style="color: #f39c12">Đang chờ mã... <span class="wait-timer" data-port="${port.id}" data-machine="${port.machineId}"></span></span>`) : 
+                    `<span style="color: #f39c12">Đang chờ mã... <span class="wait-timer" data-port="${port.id}" data-machine="${port.machineId}"></span></span>`) :
                 '<span style="color: var(--text-muted)">Chưa gửi tin nhắn</span>';
             if (!port.smsSent && commandText) {
                 otpContent = `<span style="color: var(--warning); font-weight: 600;">${escapeHtml(commandText)}</span>`;
@@ -997,11 +997,11 @@ function updateSplitSelect() {
         workers = 1;
         workersInput.value = 1;
     }
-    
+
     const partSelect = document.getElementById('split-part');
     if (!partSelect) return;
     const currentPart = parseInt(partSelect.value) || 1;
-    
+
     partSelect.innerHTML = '';
     for (let i = 1; i <= workers; i++) {
         const option = document.createElement('option');
@@ -1012,7 +1012,7 @@ function updateSplitSelect() {
         }
         partSelect.appendChild(option);
     }
-    
+
     if (currentPart > workers) {
         partSelect.value = "1";
     }
@@ -1031,9 +1031,9 @@ function renderHistory() {
     // Deduplicate history to prevent showing duplicates caused by multiple clients triggering 10s timeout
     const uniqueHistory = [];
     const seen = new Set();
-    
+
     const sortedHistory = [...state.history].sort((a, b) => getHistorySortTimestamp(b) - getHistorySortTimestamp(a));
-    
+
     sortedHistory.forEach(item => {
         const uniqueKey = `${item.id}-${item.phone}-${item.otp}`;
         if (!seen.has(uniqueKey)) {
@@ -1101,12 +1101,12 @@ function exportHistoryToExcel() {
                     <th style="width: 200px;">Thời Gian Nhận</th>
                 </tr>
     `;
-    
+
     state.history.forEach(item => {
         const phone = escapeHtml(normalizePhoneNumber(item.phone || ''));
         const otp = escapeHtml(item.otp || '');
         const time = escapeHtml(item.usedTime || '');
-        
+
         html += `
                 <tr>
                     <td>${item.id}</td>
@@ -1130,7 +1130,7 @@ function exportHistoryToExcel() {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-    
+
     showToast('Đã xuất báo cáo Excel thành công!');
 }
 
@@ -1206,7 +1206,7 @@ function openSmsModal(portId, machineId) {
     state.currentActionPortId = portId;
     currentActionMachineId = machineId;
     const port = state.ports.find(p => p.id === portId && p.machineId === machineId);
-    
+
     document.getElementById('sms-port-name').textContent = port.id + (machineId ? ` (${machineId})` : '');
     document.getElementById('sms-phone-number').textContent = port.phone || 'Chưa có SĐT';
 
@@ -1215,12 +1215,12 @@ function openSmsModal(portId, machineId) {
     if (networkEl) {
         const net = (port.network || 'UNKNOWN').toUpperCase();
         let badgeColor = '#888';
-        if (net.includes('VIETTEL'))  badgeColor = '#e74c3c';
+        if (net.includes('VIETTEL')) badgeColor = '#e74c3c';
         else if (net.includes('VINA') || net.includes('VINAPHONE')) badgeColor = '#2980b9';
-        else if (net.includes('MOBI'))     badgeColor = '#27ae60';
-        else if (net.includes('SKY'))      badgeColor = '#00a8ff';
-        else if (net.includes('LOCAL'))    badgeColor = '#e1b12c';
-        else if (net.includes('WINTEL'))   badgeColor = '#e84393';
+        else if (net.includes('MOBI')) badgeColor = '#27ae60';
+        else if (net.includes('SKY')) badgeColor = '#00a8ff';
+        else if (net.includes('LOCAL')) badgeColor = '#e1b12c';
+        else if (net.includes('WINTEL')) badgeColor = '#e84393';
         else if (net.includes('ITELECOM') || net.includes('ITEL')) badgeColor = '#d35400';
         else if (net.includes('VIETNAMOBILE') || net.includes('VNM')) badgeColor = '#f39c12';
         networkEl.textContent = port.network || 'UNKNOWN';
@@ -1231,16 +1231,16 @@ function openSmsModal(portId, machineId) {
     // UI sẽ giữ nguyên lựa chọn cuối cùng của người dùng.
     const select = document.getElementById('sms-recipient-select');
     const customInput = document.getElementById('sms-recipient-custom');
-    
+
     if (select.value === 'custom') {
         // giữ hiện custom input nếu đang ở mode custom
     } else {
         customInput.value = '';
         customInput.style.display = 'none';
     }
-    
+
     document.getElementById('sms-content').value = 'ZALO';
-    
+
     document.getElementById('sms-modal').classList.add('active');
 }
 
@@ -1300,7 +1300,7 @@ async function executeSendSms() {
         recipient = document.getElementById('sms-recipient-custom').value;
     }
     recipient = (recipient || '').trim();
-    
+
     if (!recipient) {
         showToast('Vui lòng nhập đầu số nhận!', 'error');
         return;
@@ -1310,7 +1310,7 @@ async function executeSendSms() {
         showToast('Chỉ được nhập một đầu số mỗi lần gửi. Không dùng dấu phẩy hoặc khoảng trắng.', 'error');
         return;
     }
-    
+
     const content = document.getElementById('sms-content').value.trim();
     if (!content) {
         showToast('Vui lòng nhập nội dung SMS!', 'error');
@@ -1324,12 +1324,12 @@ async function executeSendSms() {
         renderPorts();
         showToast(`[TEST] Đã gửi lệnh SMS từ ${actionPortId} đến ${recipient}`);
         closeModal('sms-modal');
-        
+
         // Mô phỏng mã OTP về sau 3 giây
         simulateOtpArrival(actionPortId, actionMachineId, content.toUpperCase().includes('ZALO'));
         return;
     }
-    
+
     let commandId = null;
     try {
         sendingSmsPorts.add(actionKey);
@@ -1355,7 +1355,7 @@ async function executeSendSms() {
             type: 'sms',
             commandId
         });
-        
+
         const port = state.ports.find(p => p.id === actionPortId && p.machineId === actionMachineId);
         if (port && !port.isTest) {
             // Xoá OTP cũ hiển thị trên trình duyệt để chuyển sang trạng thái "Đang chờ mã..."
@@ -1364,7 +1364,7 @@ async function executeSendSms() {
             port.commandId = commandId;
             port.commandIds = null;
             port.commandStatus = 'queued';
-            
+
             await Promise.all([
                 db.ref(`machines/${actionMachineId}/ports/${actionPortId}/otp`).remove(),
                 db.ref(`web_states/machines/${actionMachineId}/ports/${actionPortId}`).update({ errorMsg: null })
@@ -1374,7 +1374,7 @@ async function executeSendSms() {
             port.smsSent = true;
             renderPorts();
         }
-        
+
         showToast(`Đã gửi lệnh SMS từ ${actionPortId} (${actionMachineId}) đến ${recipient}`);
     } catch (error) {
         if (commandId) {
@@ -1384,11 +1384,11 @@ async function executeSendSms() {
     } finally {
         sendingSmsPorts.delete(actionKey);
     }
-    
+
     closeModal('sms-modal');
 }
 
-window.checkBalance = async function(portId, machineId) {
+window.checkBalance = async function (portId, machineId) {
     if (portId.startsWith('COM_TEST')) {
         showToast(`[TEST] Đã gửi lệnh kiểm tra số dư cho cổng ${portId}`);
         return;
@@ -1482,13 +1482,13 @@ async function clearCommandResults(ids) {
     await Promise.all(promises);
 }
 
-window.cancelSmsWait = async function(portId, machineId) {
+window.cancelSmsWait = async function (portId, machineId) {
     const stateKey = `${machineId}_${portId}`;
     const webState = globalWebStates[stateKey] || {};
     const idsToCancel = Array.isArray(webState.commandIds)
         ? webState.commandIds
         : (webState.commandId ? [webState.commandId] : []);
-        
+
     const portResults = Object.keys(commandResults).filter(id => {
         const res = commandResults[id];
         return res && res.portId === portId && res.machineId === machineId;
@@ -1500,7 +1500,7 @@ window.cancelSmsWait = async function(portId, machineId) {
         idsToCancel.forEach(id => promises.push(db.ref(`commands/${id}`).remove()));
     }
     promises.push(clearCommandResults(allIdsToCancel));
-    
+
     const port = state.ports.find(p => p.id === portId && p.machineId === machineId);
     if (port && port.otp) {
         promises.push(db.ref(`web_states/machines/${machineId}/ports/${portId}`).update({ clearedOtp: port.otp, smsSent: null, commandId: null, commandIds: null, commandStatus: null, errorMsg: null }));
@@ -1508,9 +1508,9 @@ window.cancelSmsWait = async function(portId, machineId) {
         promises.push(db.ref(`web_states/machines/${machineId}/ports/${portId}`).remove());
     }
     promises.push(db.ref(`machines/${machineId}/ports/${portId}/otp`).remove());
-    
+
     await Promise.all(promises);
-    
+
     // Xoá OTP trên giao diện nếu đang có
     if (port) {
         if (port.otp) port.otp = null;
@@ -1521,11 +1521,11 @@ window.cancelSmsWait = async function(portId, machineId) {
         port.errorMsg = null;
         renderPorts();
     }
-    
+
     showToast(`Đã hủy chờ OTP cho cổng ${portId} (${machineId})`);
 }
 
-window.cancelAllSmsWait = async function() {
+window.cancelAllSmsWait = async function () {
     const visiblePorts = state.ports.filter(p => !p.hidden && !p.isTest && p.status === 'online');
     if (visiblePorts.length === 0) {
         showToast('Không có cổng nào đang hoạt động!', 'error');
@@ -1539,7 +1539,7 @@ window.cancelAllSmsWait = async function() {
         const idsToCancel = Array.isArray(webState.commandIds)
             ? webState.commandIds
             : (webState.commandId ? [webState.commandId] : []);
-            
+
         const portResults = Object.keys(commandResults).filter(id => {
             const res = commandResults[id];
             return res && res.portId === port.id && res.machineId === port.machineId;
@@ -1568,7 +1568,7 @@ window.cancelAllSmsWait = async function() {
     showToast(`Đã hủy chờ OTP cho ${visiblePorts.length} cổng`);
 }
 
-window.clearAllCommandResults = async function() {
+window.clearAllCommandResults = async function () {
     await db.ref('command_results').remove();
     commandResults = {};
     appliedCommandResults = {};
@@ -1576,7 +1576,7 @@ window.clearAllCommandResults = async function() {
     showToast('Đã dọn sạch toàn bộ kết quả lệnh trên Firebase và giao diện.');
 }
 
-window.restoreAllHiddenPorts = function() {
+window.restoreAllHiddenPorts = function () {
     let count = 0;
     Object.keys(globalWebStates).forEach(stateKey => {
         const webState = globalWebStates[stateKey];
@@ -1596,7 +1596,7 @@ window.restoreAllHiddenPorts = function() {
     }
 }
 
-window.checkAllBalance = async function() {
+window.checkAllBalance = async function () {
     const visiblePorts = state.ports.filter(p => !p.hidden && !p.isTest && p.status === 'online');
     if (visiblePorts.length === 0) {
         showToast('Không có cổng nào đang hoạt động!', 'error');
@@ -1613,11 +1613,11 @@ window.checkAllBalance = async function() {
     }
 }
 
-window.refreshAllPorts = function() {
+window.refreshAllPorts = function () {
     showToast('Đang gửi lệnh làm mới toàn bộ cổng trên tất cả các máy...');
     // Lấy danh sách các máy tính đang hoạt động
     const activeMachines = [...new Set(state.ports.filter(p => !p.isTest).map(p => p.machineId))];
-    
+
     activeMachines.forEach(mId => {
         createCommand({
             machineId: mId,
@@ -1639,16 +1639,16 @@ async function markAsUsed(portId, machineId) {
     const portIndex = state.ports.findIndex(p => p.id === portId && p.machineId === machineId);
     if (portIndex > -1) {
         const port = state.ports[portIndex];
-        
+
         // Ngăn chặn bấm nhiều lần liên tiếp (double click spam)
         if (port.isMarking) return;
         port.isMarking = true;
-        
+
         // Add exit animation class
         const row = document.getElementById(`row-${port.machineId}-${port.id}`);
-        if(row) {
+        if (row) {
             row.classList.add('row-exit');
-            
+
             const phoneKey = toFirebaseKey((port.phone || 'NO_PHONE').replace(/\s+/g, ''));
             const otpKey = toFirebaseKey(port.otp || 'NO_OTP');
             const historyKey = `${toFirebaseKey(machineId)}_${toFirebaseKey(portId)}_${phoneKey}_${otpKey}`;
@@ -1673,7 +1673,7 @@ async function markAsUsed(portId, machineId) {
                 port.isMarking = false;
                 return;
             }
-            
+
             // Đồng bộ trạng thái ẨN cho mọi người
             db.ref(`web_states/machines/${port.machineId}/ports/${port.id}`).update({
                 hiddenOtp: port.otp || 'NONE',
@@ -1690,7 +1690,7 @@ async function markAsUsed(portId, machineId) {
 function restoreFromHistory(portId, machineId, usedTime, fbKey) {
     // Xoá trạng thái ẩn trên Firebase cho tất cả mọi người
     db.ref(`web_states/machines/${machineId}/ports/${portId}`).remove();
-    
+
     // Cập nhật state local
     const port = state.ports.find(p => p.id === portId && p.machineId === machineId);
     if (port) {
@@ -1698,7 +1698,7 @@ function restoreFromHistory(portId, machineId, usedTime, fbKey) {
         port.smsSent = false;
         port.isMarking = false; // Reset cờ trạng thái
     }
-    
+
     // Xóa entry khỏi lịch sử trên Firebase
     if (fbKey && fbKey !== 'undefined') {
         db.ref(`history/${fbKey}`).remove();
@@ -1711,7 +1711,7 @@ function restoreFromHistory(portId, machineId, usedTime, fbKey) {
             renderHistory();
         }
     }
-    
+
     showToast(`Đã khôi phục cổng ${portId} (${machineId}) về trạng thái đang hoạt động.`);
 }
 
@@ -1728,7 +1728,7 @@ function simulateOtpArrival(portId, machineId, isZalo = false) {
             port.otp = isZalo ? Math.floor(1000 + Math.random() * 9000).toString() : Math.floor(100000 + Math.random() * 900000).toString();
             scheduleAutoHistory(portId, machineId);
             renderPorts();
-                    // OTP mới vẫn hiển thị trên bảng, không hiện toast/âm thanh.
+            // OTP mới vẫn hiển thị trên bảng, không hiện toast/âm thanh.
         }
     }, 3000);
 }
@@ -1765,18 +1765,18 @@ function showToast(message, type = 'success') {
     const container = document.getElementById('toast-container');
     const toast = document.createElement('div');
     toast.className = 'toast';
-    
+
     const icon = type === 'success' ? 'check-circle' : 'alert-circle';
     const color = type === 'success' ? 'var(--success)' : 'var(--danger)';
-    
+
     toast.innerHTML = `
         <i data-lucide="${icon}" style="color: ${color}"></i>
         <span>${escapeHtml(message)}</span>
     `;
-    
+
     container.appendChild(toast);
     lucide.createIcons();
-    
+
     setTimeout(() => {
         toast.style.animation = 'toastOut 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards';
         setTimeout(() => {
@@ -1796,15 +1796,15 @@ document.getElementById('nav-active').addEventListener('click', (e) => {
     document.getElementById('nav-history').classList.remove('active');
     const navFirefox = document.getElementById('nav-firefox');
     if (navFirefox) navFirefox.classList.remove('active');
-    
+
     document.getElementById('active-view').style.display = 'flex';
     document.getElementById('history-view').style.display = 'none';
     const firefoxView = document.getElementById('firefox-view');
     if (firefoxView) firefoxView.style.display = 'none';
-    
+
     const topBarControls = document.getElementById('top-bar-controls');
     if (topBarControls) topBarControls.style.display = 'flex';
-    
+
     document.getElementById('page-title').textContent = 'Quản lý Cổng SIM';
     renderPorts();
 });
@@ -1815,15 +1815,15 @@ document.getElementById('nav-history').addEventListener('click', (e) => {
     document.getElementById('nav-active').classList.remove('active');
     const navFirefox = document.getElementById('nav-firefox');
     if (navFirefox) navFirefox.classList.remove('active');
-    
+
     document.getElementById('active-view').style.display = 'none';
     document.getElementById('history-view').style.display = 'flex';
     const firefoxView = document.getElementById('firefox-view');
     if (firefoxView) firefoxView.style.display = 'none';
-    
+
     const topBarControls = document.getElementById('top-bar-controls');
     if (topBarControls) topBarControls.style.display = 'none';
-    
+
     document.getElementById('page-title').textContent = 'Lịch sử OTP';
     renderHistory();
 });
@@ -1835,15 +1835,14 @@ if (navFirefoxBtn) {
         navFirefoxBtn.classList.add('active');
         document.getElementById('nav-active').classList.remove('active');
         document.getElementById('nav-history').classList.remove('active');
-        
+
         document.getElementById('active-view').style.display = 'none';
         document.getElementById('history-view').style.display = 'none';
         document.getElementById('firefox-view').style.display = 'block'; // Or flex if preferred
-        
+
         const topBarControls = document.getElementById('top-bar-controls');
         if (topBarControls) topBarControls.style.display = 'none';
-        
-        document.getElementById('page-title').textContent = 'Quản lý API Firefox.fun';
+
         renderFirefoxPorts();
     });
 }
@@ -1855,7 +1854,7 @@ window.onload = () => {
     const noteEl = document.getElementById('global-note');
     if (noteEl) {
         let isLocalUpdate = false;
-        
+
         db.ref('global_note').on('value', (snapshot) => {
             const val = snapshot.val() || '';
             if (!isLocalUpdate) {
@@ -1886,21 +1885,21 @@ window.onload = () => {
         if (document.getElementById('history-view').style.display === 'flex') {
             renderHistory();
         }
-        
+
         // Gọi lại applyWebStates để lập tức ẩn các số vừa vào lịch sử
         applyWebStates();
     });
 
     db.ref('command_results').orderByChild('updatedAt').limitToLast(200).on('value', async (snapshot) => {
         const results = snapshot.val() || {};
-        
+
         for (const id in commandResults) {
             if (!results[id]) {
                 delete commandResults[id];
                 delete appliedCommandResults[id];
             }
         }
-        
+
         const visibleResults = { ...commandResults };
         const now = Date.now() + serverTimeOffset;
         const AGE_LIMIT = 30 * 60 * 1000;
@@ -1923,7 +1922,7 @@ window.onload = () => {
     });
 
     fetchPorts();
-    
+
     // Firebase on('value') tự động realtime nên không cần setInterval hay SSE nữa
     // Lắng nghe server_status đã được gộp vào fetchPorts() qua lastSyncByMachine
 
@@ -1934,7 +1933,7 @@ window.onload = () => {
 function checkConnectionStatus() {
     const indicator = document.querySelector('.system-status .status-indicator');
     const textSpan = document.querySelector('.system-status span');
-    
+
     const now = Date.now() + serverTimeOffset;
     let hasChanges = false;
 
@@ -1957,7 +1956,7 @@ function checkConnectionStatus() {
     if (!indicator || !textSpan) return;
 
     const visibleCount = state.ports.filter(p => !p.hidden && !p.isTest).length;
-    
+
     let isAnyAlive = false;
     Object.values(lastSyncByMachine).forEach(sync => {
         if (now - sync <= 15000) isAnyAlive = true;
@@ -1976,7 +1975,7 @@ function checkConnectionStatus() {
 }
 
 // Đóng modal khi nhấn ra ngoài
-window.onclick = function(event) {
+window.onclick = function (event) {
     if (event.target.classList.contains('modal-overlay')) {
         closeModal(event.target.id);
     }
@@ -1994,18 +1993,18 @@ function loadFirefoxConfig() {
         const config = JSON.parse(localStorage.getItem(FF_CONFIG_KEY) || '{}');
         const baseUrlEl = document.getElementById('ff-base-url');
         if (baseUrlEl) baseUrlEl.value = config.baseUrl || '/api/firefox';
-        
+
         const tokenEl = document.getElementById('ff-token');
         if (tokenEl) tokenEl.value = config.token || '';
-        
+
         const srvIdEl = document.getElementById('ff-service-id');
         if (srvIdEl) srvIdEl.value = config.serviceId || '';
-        
+
         const countryEl = document.getElementById('ff-country');
         if (countryEl) countryEl.value = config.country || 'vn';
-        
+
         state.firefoxPorts = JSON.parse(localStorage.getItem(FF_PORTS_KEY) || '[]');
-        
+
         // Clean up expired ports on load
         const now = Date.now();
         state.firefoxPorts.forEach(p => {
@@ -2051,7 +2050,7 @@ function loadFirefoxConfig() {
             }
         });
         saveFirefoxPorts();
-    } catch(e) {
+    } catch (e) {
         console.error('Failed to load firefox config', e);
     }
 }
@@ -2064,7 +2063,7 @@ function saveFirefoxPorts() {
     }
 }
 
-window.firefoxSaveConfig = function() {
+window.firefoxSaveConfig = function () {
     const config = {
         baseUrl: document.getElementById('ff-base-url').value.trim(),
         token: document.getElementById('ff-token').value.trim(),
@@ -2087,18 +2086,18 @@ async function callFirefoxApi(params) {
         showToast('Vui lòng nhập Token trước!', 'error');
         return null;
     }
-    
+
     if (config.token) {
         params.token = config.token;
     }
-    
+
     let urlStr = baseUrl;
     if (urlStr.includes('?')) {
         urlStr += '&' + new URLSearchParams(params).toString();
     } else {
         urlStr += '?' + new URLSearchParams(params).toString();
     }
-    
+
     try {
         const response = await fetch(urlStr, {
             method: 'GET',
@@ -2111,7 +2110,7 @@ async function callFirefoxApi(params) {
     }
 }
 
-window.firefoxCheckBalance = async function() {
+window.firefoxCheckBalance = async function () {
     const res = await callFirefoxApi({ act: 'myInfo' });
     if (res) {
         const parts = res.split('|');
@@ -2125,26 +2124,26 @@ window.firefoxCheckBalance = async function() {
     }
 }
 
-window.firefoxGetPhone = async function() {
+window.firefoxGetPhone = async function () {
     const config = getFirefoxConfig();
     if (!config.serviceId) {
         showToast('Vui lòng nhập Service ID!', 'error');
         return;
     }
-    
+
     showToast('Đang thuê số mới...');
     const res = await callFirefoxApi({
         act: 'getPhone',
         iid: config.serviceId,
         country: config.country || 'vn'
     });
-    
+
     if (res) {
         const parts = res.split('|');
         if (parts[0] === '1') {
             const pkey = parts[1];
             const mobile = parts[7] || parts[4]; // Fallback if format is weird, but docs say 7
-            
+
             state.firefoxPorts.unshift({
                 pkey: pkey,
                 phone: mobile,
@@ -2162,7 +2161,7 @@ window.firefoxGetPhone = async function() {
     }
 }
 
-window.firefoxSetRel = async function(pkey) {
+window.firefoxSetRel = async function (pkey) {
     const res = await callFirefoxApi({ act: 'setRel', pkey: pkey });
     if (res && res.startsWith('1|')) {
         state.firefoxPorts = state.firefoxPorts.filter(p => p.pkey !== pkey);
@@ -2194,7 +2193,7 @@ window.firefoxSetRel = async function(pkey) {
     }
 }
 
-window.firefoxAddBlack = async function(pkey) {
+window.firefoxAddBlack = async function (pkey) {
     const res = await callFirefoxApi({ act: 'addBlack', pkey: pkey, reason: 'error' });
     if (res && res.startsWith('1|')) {
         state.firefoxPorts = state.firefoxPorts.filter(p => p.pkey !== pkey);
@@ -2209,9 +2208,9 @@ window.firefoxAddBlack = async function(pkey) {
     }
 }
 
-window.firefoxSetAgain = async function(pkey) {
+window.firefoxSetAgain = async function (pkey) {
     if (!confirm('Dùng lại số (Reuse) sẽ bị tính phí thêm một lần nữa. Bạn có chắc chắn muốn dùng lại số này không?')) return;
-    
+
     showToast('Đang yêu cầu dùng lại số...');
     const res = await callFirefoxApi({ act: 'setAgain', pkey: pkey, min: 5 });
     if (res && res.startsWith('1|')) {
@@ -2229,10 +2228,10 @@ window.firefoxSetAgain = async function(pkey) {
     }
 }
 
-window.firefoxApiReturn = async function(pkey) {
+window.firefoxApiReturn = async function (pkey) {
     const remark = prompt('Nhập mã Feedback (0: Thành công, -1: Thất bại, -2: Không có mã, -3: Số đã bị dùng):', '0');
     if (remark === null) return; // user cancelled
-    
+
     if (!['0', '-1', '-2', '-3'].includes(remark)) {
         showToast('Mã feedback không hợp lệ!', 'error');
         return;
@@ -2251,19 +2250,19 @@ let isFirefoxPolling = false;
 async function pollFirefoxOtps() {
     if (isFirefoxPolling) return;
     isFirefoxPolling = true;
-    
+
     try {
         let hasChanges = false;
         const now = Date.now();
-        
+
         for (let i = 0; i < state.firefoxPorts.length; i++) {
             const port = state.firefoxPorts[i];
-            
+
             // Tự động Release nếu quá hạn
             if (port.status === 'waiting' && now > port.expireTime) {
                 port.status = 'releasing';
                 hasChanges = true;
-                
+
                 callFirefoxApi({ act: 'setRel', pkey: port.pkey }).then(res => {
                     if (res && res.startsWith('1|')) {
                         state.firefoxPorts = state.firefoxPorts.filter(p => p.pkey !== port.pkey);
@@ -2303,7 +2302,7 @@ async function pollFirefoxOtps() {
                 });
                 continue;
             }
-            
+
             if (port.status === 'waiting') {
                 const res = await callFirefoxApi({ act: 'getPhoneCode', pkey: port.pkey });
                 if (res) {
@@ -2312,19 +2311,19 @@ async function pollFirefoxOtps() {
                         port.status = 'otp';
                         port.otp = parts[1];
                         port.smsContent = parts.slice(2).join('|');
-                        
+
                         // Lưu vào History
                         const historyKey = `FIREFOX_${port.pkey}_${Date.now()}`;
                         const historyRef = db.ref(`history/${historyKey}`);
                         historyRef.set({
-                            id: `FF_${port.pkey.slice(0,5)}`,
+                            id: `FF_${port.pkey.slice(0, 5)}`,
                             machineId: 'FIREFOX_API',
                             phone: port.phone,
                             otp: port.otp,
                             usedTime: new Date().toLocaleTimeString('vi-VN'),
                             timestamp: firebase.database.ServerValue.TIMESTAMP
                         });
-                        
+
                         hasChanges = true;
                         playNotificationSound();
                         showToast(`Có OTP mới cho số ${port.phone}: ${port.otp}`);
@@ -2339,7 +2338,7 @@ async function pollFirefoxOtps() {
                 }
             }
         }
-        
+
         if (hasChanges) {
             saveFirefoxPorts();
         }
@@ -2358,19 +2357,19 @@ setInterval(() => {
 
 setInterval(pollFirefoxOtps, 5000);
 
-window.renderFirefoxPorts = function() {
+window.renderFirefoxPorts = function () {
     const container = document.getElementById('firefox-container');
     if (!container) return;
-    
+
     container.innerHTML = '';
-    
+
     if (state.firefoxPorts.length === 0) {
         container.innerHTML = `<div style="padding: 40px; text-align: center; color: var(--text-muted);">Không có số nào đang thuê.</div>`;
         return;
     }
-    
+
     const now = Date.now();
-    
+
     state.firefoxPorts.forEach(port => {
         const row = document.createElement('div');
         row.className = 'grid-row';
@@ -2379,10 +2378,10 @@ window.renderFirefoxPorts = function() {
         } else if (port.status === 'releasing_failed') {
             row.style.background = 'rgba(231, 76, 60, 0.1)';
         }
-        
+
         let uiStatus = 'waiting';
         let statusLabel = 'Đang chờ';
-        
+
         if (port.status === 'otp') {
             uiStatus = 'otp';
             statusLabel = 'Đã nhận';
@@ -2393,9 +2392,9 @@ window.renderFirefoxPorts = function() {
             uiStatus = 'error';
             statusLabel = 'Huỷ lỗi';
         }
-        
+
         const statusDot = `<span class="status-pill ${uiStatus}">${escapeHtml(statusLabel)}</span>`;
-        
+
         let timeText = '--';
         if (port.status === 'waiting' || port.status === 'releasing') {
             const timeLeft = Math.max(0, Math.floor((port.expireTime - now) / 1000));
@@ -2405,7 +2404,7 @@ window.renderFirefoxPorts = function() {
                 timeText = `${Math.floor(timeLeft / 60)}m ${timeLeft % 60}s`;
             }
         }
-        
+
         let otpContent = '';
         if (port.status === 'waiting' || port.status === 'releasing') {
             otpContent = `<span style="color: #f39c12">Đang chờ mã...</span>`;
@@ -2414,10 +2413,10 @@ window.renderFirefoxPorts = function() {
         } else {
             otpContent = `<span class="otp-badge">${escapeHtml(port.otp)}</span> <br><span style="font-size:11px;color:gray;">${escapeHtml(port.smsContent)}</span>`;
         }
-            
+
         let actionButtons = '';
         if (port.status === 'waiting') {
-             actionButtons = `
+            actionButtons = `
                     <button class="btn btn-primary" onclick="firefoxOpenSmsModal('${port.pkey}', '${port.phone}')" title="Gửi SMS đi">
                         <i data-lucide="send"></i> Gửi SMS
                     </button>
@@ -2441,7 +2440,7 @@ window.renderFirefoxPorts = function() {
                     </button>
             `;
         } else if (port.status === 'releasing') {
-             actionButtons = `
+            actionButtons = `
                     <button class="btn btn-outline" disabled>
                         <i data-lucide="loader"></i> Đang xử lý...
                     </button>
@@ -2456,7 +2455,7 @@ window.renderFirefoxPorts = function() {
                     </button>
             `;
         }
-            
+
         row.innerHTML = `
             <div class="col-status" style="width: 80px;">${statusDot}</div>
             <div class="col-phone" style="width: 150px;">${escapeHtml(port.phone)}</div>
@@ -2466,38 +2465,58 @@ window.renderFirefoxPorts = function() {
                 ${actionButtons}
             </div>
         `;
-        
+
         container.appendChild(row);
     });
-    
+
     if (window.lucide) {
         lucide.createIcons();
     }
 }
 
-window.firefoxClosePort = function(pkey) {
+window.firefoxClosePort = function (pkey) {
     state.firefoxPorts = state.firefoxPorts.filter(p => p.pkey !== pkey);
     saveFirefoxPorts();
 }
 
-window.firefoxOpenSmsModal = function(pkey, phone) {
+window.firefoxOpenSmsModal = function (pkey, phone) {
     document.getElementById('ff-sms-pkey').value = pkey;
     document.getElementById('ff-sms-phone').textContent = phone;
-    document.getElementById('ff-sms-receiver').value = '';
+    
+    const select = document.getElementById('ff-sms-receiver-select');
+    const customInput = document.getElementById('ff-sms-receiver-custom');
+    
+    if (select.value === 'custom') {
+        // keep custom input visible if already selected
+    } else {
+        customInput.value = '';
+        customInput.style.display = 'none';
+    }
+    
     document.getElementById('ff-sms-content').value = 'ZALO';
     document.getElementById('firefox-sms-modal').classList.add('active');
 }
 
-window.firefoxExecuteSendSms = async function() {
+window.firefoxExecuteSendSms = async function () {
     const pkey = document.getElementById('ff-sms-pkey').value;
-    const receiver = document.getElementById('ff-sms-receiver').value.trim();
-    const content = document.getElementById('ff-sms-content').value.trim();
     
+    let receiver = document.getElementById('ff-sms-receiver-select').value;
+    if (receiver === 'custom') {
+        receiver = document.getElementById('ff-sms-receiver-custom').value;
+    }
+    receiver = (receiver || '').trim();
+    
+    const content = document.getElementById('ff-sms-content').value.trim();
+
     if (!receiver || !content) {
         showToast('Vui lòng nhập đủ đầu số nhận và nội dung!', 'error');
         return;
     }
-    
+    if (/[,;\s]/.test(receiver)) {
+        showToast('Chỉ được nhập một đầu số mỗi lần gửi. Không dùng dấu phẩy hoặc khoảng trắng.', 'error');
+        return;
+    }
+
     showToast('Đang gửi lệnh SMS...');
     const res = await callFirefoxApi({
         act: 'sendCode',
@@ -2505,7 +2524,7 @@ window.firefoxExecuteSendSms = async function() {
         receiver: receiver,
         smscontent: content
     });
-    
+
     if (res && res.startsWith('1|')) {
         showToast('Đã gửi lệnh SMS Outbound thành công! Đang chờ phản hồi...');
         closeModal('firefox-sms-modal');
@@ -2515,24 +2534,24 @@ window.firefoxExecuteSendSms = async function() {
     }
 }
 
-window.firefoxLoadServices = async function() {
+window.firefoxLoadServices = async function () {
     showToast('Đang tải danh sách dịch vụ...');
     try {
         const res = await callFirefoxApi({ act: 'getItem', key: '' });
         if (res && res.startsWith('[')) {
             const items = JSON.parse(res);
-            
+
             // Generate datalist for services
             const servicesMap = new Map();
             const countriesMap = new Map();
-            
+
             items.forEach(item => {
                 servicesMap.set(item.Item_ID, `${item.Item_Name} - ${item.Item_UPrice} VND`);
                 if (item.Country_ID) {
                     countriesMap.set(item.Country_ID, item.Country_Title);
                 }
             });
-            
+
             const srvDataList = document.getElementById('ff-services-list');
             if (srvDataList) {
                 srvDataList.innerHTML = '';
@@ -2543,7 +2562,7 @@ window.firefoxLoadServices = async function() {
                     srvDataList.appendChild(opt);
                 });
             }
-            
+
             const countryDataList = document.getElementById('ff-countries-list');
             if (countryDataList) {
                 countryDataList.innerHTML = '';
@@ -2554,14 +2573,61 @@ window.firefoxLoadServices = async function() {
                     countryDataList.appendChild(opt);
                 });
             }
-            
+
+            window.ffGlobalPricingData = items;
+            renderFirefoxPricingTable(items);
+            document.getElementById('firefox-pricing-modal').classList.add('active');
+
             showToast('Tải danh sách dịch vụ và bảng giá thành công!');
         } else {
             showToast(`Lỗi tải danh sách: ${res}`, 'error');
         }
-    } catch(e) {
+    } catch (e) {
         showToast('Lỗi tải danh sách dịch vụ (CORS hoặc Network)', 'error');
         console.error(e);
     }
 }
+
+window.renderFirefoxPricingTable = function (items) {
+    const tbody = document.getElementById('ff-pricing-tbody');
+    if (!tbody) return;
+    tbody.innerHTML = '';
+
+    items.forEach(item => {
+        const tr = document.createElement('tr');
+        tr.style.borderBottom = '1px solid var(--border-color)';
+        tr.innerHTML = `
+            <td style="padding: 12px 16px; white-space: nowrap;">${item.Item_ID}</td>
+            <td style="padding: 12px 16px;">${escapeHtml(item.Item_Name)}</td>
+            <td style="padding: 12px 16px;">${escapeHtml(item.Country_Title || '')} (${item.Country_ID || ''})</td>
+            <td style="padding: 12px 16px; color: #2ecc71; font-weight: bold; white-space: nowrap;">${item.Item_UPrice}</td>
+            <td style="padding: 12px 16px; white-space: nowrap;">
+                <button class="btn btn-primary" onclick="firefoxSelectService('${item.Item_ID}', '${item.Country_ID || ''}')" style="padding: 6px 12px; font-size: 12px; min-height: unset; height: 28px;">Chọn</button>
+            </td>
+        `;
+        tbody.appendChild(tr);
+    });
+}
+
+window.firefoxSelectService = function (srvId, countryId) {
+    document.getElementById('ff-service-id').value = srvId;
+    document.getElementById('ff-country').value = countryId;
+    closeModal('firefox-pricing-modal');
+    showToast('Đã chọn dịch vụ thành công!');
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    const searchInput = document.getElementById('ff-pricing-search');
+    if (searchInput) {
+        searchInput.addEventListener('input', (e) => {
+            const term = e.target.value.toLowerCase();
+            const filtered = (window.ffGlobalPricingData || []).filter(item =>
+                (item.Item_Name || '').toLowerCase().includes(term) ||
+                (item.Country_Title || '').toLowerCase().includes(term) ||
+                (item.Item_ID || '').toString().includes(term)
+            );
+            renderFirefoxPricingTable(filtered);
+        });
+    }
+});
 
