@@ -2192,7 +2192,11 @@ window.firefoxCheckBalance = async function () {
         const parts = res.split('|');
         if (parts[0] === '1' && parts[1]) {
             const balEl = document.getElementById('firefox-balance');
+            const levelEl = document.getElementById('firefox-level');
+            const intEl = document.getElementById('firefox-integral');
             if (balEl) balEl.textContent = `Số dư: ${parts[1]} VND`;
+            if (levelEl && parts[2]) levelEl.textContent = `Cấp độ: ${parts[2]}`;
+            if (intEl && parts[3]) intEl.textContent = `Điểm: ${parts[3]}`;
             showToast(`Kết nối thành công. Số dư: ${parts[1]} VND`);
         } else if (res === '0|-3') {
             showToast('Lỗi: Thao tác quá nhanh, vui lòng đợi 60s trước khi kiểm tra lại.', 'error');
