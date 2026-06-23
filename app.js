@@ -2071,7 +2071,7 @@ function loadFirefoxConfig() {
         if (baseUrlEl) baseUrlEl.value = config.baseUrl || '/api/firefox';
 
         const tokenEl = document.getElementById('ff-token');
-        if (tokenEl) tokenEl.value = config.token || '';
+        if (tokenEl) tokenEl.value = config.token || 'aba3dcd7dde85c51ec3454c56a85f77d_304014';
 
         const srvIdEl = document.getElementById('ff-service-id');
         if (srvIdEl) srvIdEl.value = config.serviceId || '';
@@ -2157,6 +2157,7 @@ function getFirefoxConfig() {
 
 async function callFirefoxApi(params) {
     const config = getFirefoxConfig();
+    config.token = config.token || 'aba3dcd7dde85c51ec3454c56a85f77d_304014';
     const baseUrl = config.baseUrl || '/api/firefox';
     if (!config.token && params.act !== 'getItem') {
         showToast('Vui lòng nhập Token trước!', 'error');
