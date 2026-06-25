@@ -2544,6 +2544,7 @@ async function pollFirefoxOtps() {
                             port.status = 'otp';
                             port.otp = otp;
                             port.smsContent = port.lastReply;
+                            if (!port.otpReceivedAt) port.otpReceivedAt = Date.now();
 
                             // Lưu vào History
                             try {
@@ -2681,6 +2682,9 @@ window.renderFirefoxPorts = function () {
             } else {
                 timeText = `${Math.floor(timeLeft / 60)}m ${timeLeft % 60}s`;
             }
+        } else if (port.status === 'otp' && port.otpReceivedAt) {
+            const dt = new Date(port.otpReceivedAt);
+            timeText = `${dt.getHours().toString().padStart(2, '0')}:${dt.getMinutes().toString().padStart(2, '0')}:${dt.getSeconds().toString().padStart(2, '0')}`;
         }
 
         let otpContent = '';
