@@ -2699,7 +2699,9 @@ window.viewUserStats = function(customerId) {
 }
 
 function logout() {
-    auth.signOut();
+    auth.signOut().then(() => {
+        window.location.reload();
+    });
 }
 
 window.checkUserLimits = function() {
@@ -4410,7 +4412,11 @@ window.showDashStatDetails = function(type) {
         
         const sorted = [...window.currentDashboardHistory].sort((a,b) => (Number(b.timestamp||0) - Number(a.timestamp||0)));
         const displayData = sorted.filter(item => {
-            const ts = Number(item.timestamp || 0);
+            let ts = Number(item.timestamp || 0);
+            if (ts === 0 && item.usedTime) {
+                const timeParts = item.usedTime.split(' ');
+                if (timeParts.length > 1) ts = now.getTime();
+            }
             if (ts <= 0) return false;
             if (type === 'today') return ts >= dToday.getTime();
             if (type === 'yesterday') return ts >= dYesterday.getTime() && ts < dToday.getTime();

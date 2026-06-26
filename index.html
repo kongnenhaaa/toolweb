@@ -24,6 +24,19 @@
 <body>
     <canvas id="snow-canvas" style="position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; pointer-events: none; z-index: 9999; opacity: 0.4;"></canvas>
     <script>
+        window.isSnowEnabled = localStorage.getItem('snowEnabled') !== 'false';
+        window.toggleSnowSetting = function(checkbox) {
+            window.isSnowEnabled = checkbox.checked;
+            localStorage.setItem('snowEnabled', window.isSnowEnabled);
+        };
+        
+        document.addEventListener('DOMContentLoaded', () => {
+            const snowToggle = document.getElementById('setting-snow-toggle');
+            if (snowToggle) {
+                snowToggle.checked = window.isSnowEnabled;
+            }
+        });
+
         (function() {
             const canvas = document.getElementById('snow-canvas');
             const ctx = canvas.getContext('2d');
@@ -83,7 +96,16 @@
             
             function loop() {
                 requestAnimationFrame(loop);
-                draw(); // Luôn chạy vẽ tuyết, kể cả ở trang trong
+                
+                const loginContainer = document.getElementById('login-container');
+                const isLoginVisible = loginContainer && window.getComputedStyle(loginContainer).display !== 'none';
+                
+                if (window.isSnowEnabled || isLoginVisible) {
+                    canvas.style.display = 'block';
+                    draw();
+                } else {
+                    canvas.style.display = 'none';
+                }
             }
             loop();
         })();
@@ -914,8 +936,8 @@
                         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
                             <h3 style="font-size: 16px; color: white;">Xu hướng theo thời gian</h3>
                             <select id="chart-time-range" onchange="renderDashboardCharts()" style="background: rgba(255,255,255,0.05); border: 1px solid var(--border-color); color: white; padding: 4px 8px; border-radius: 4px; font-size: 13px; outline: none; cursor: pointer;">
-                                <option value="today" style="color:black;">Hôm nay (24h)</option>
-                                <option value="7days" selected style="color:black;">7 Ngày gần nhất</option>
+                                <option value="today" selected style="color:black;">Hôm nay (24h)</option>
+                                <option value="7days" style="color:black;">7 Ngày gần nhất</option>
                                 <option value="30days" style="color:black;">30 Ngày gần nhất</option>
                             </select>
                         </div>
@@ -1310,6 +1332,14 @@
                     <label style="margin-bottom: 0; font-size: 15px; font-weight: 500;">Âm thanh thông báo OTP</label>
                     <label class="switch">
                         <input type="checkbox" id="setting-sound-toggle" onchange="toggleSoundSetting(this)">
+                        <span class="slider round"></span>
+                    </label>
+                </div>
+                <div class="form-group"
+                    style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 0; margin-top: 16px;">
+                    <label style="margin-bottom: 0; font-size: 15px; font-weight: 500;">Hiệu ứng tuyết rơi</label>
+                    <label class="switch">
+                        <input type="checkbox" id="setting-snow-toggle" onchange="toggleSnowSetting(this)" checked>
                         <span class="slider round"></span>
                     </label>
                 </div>
