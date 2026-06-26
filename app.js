@@ -2413,8 +2413,13 @@ window.toggleToolGsm = async function(uid, isEnabled) {
         
         // Ghi log
         const u = adminUsersData[uid];
-        await logAdminAction('UPDATE_TOOLGSM', `Thay đổi quyền Tool GSM cho khách hàng [${u?.email || uid}]: ${isEnabled ? 'Bật' : 'Tắt'}`, currentUserProfile.email, uid);
-        
+        await db.ref('admin_logs').push({
+            action: 'UPDATE_TOOLGSM',
+            targetUid: uid,
+            adminEmail: currentUserProfile.email,
+            details: `Thay đổi quyền Tool GSM cho khách hàng [${u?.email || uid}]: ${isEnabled ? 'Bật' : 'Tắt'}`,
+            timestamp: firebase.database.ServerValue.TIMESTAMP
+        });
         showToast(`Đã ${isEnabled ? 'Bật' : 'Tắt'} quyền đẩy tool GSM cho khách hàng này.`, 'success');
     } catch (e) {
         console.error(e);
@@ -4191,14 +4196,28 @@ function renderDashboardHistory(historyData, isAdminAll) {
     }
 
     list.innerHTML = '';
-    const sorted = [...historyData].sort((a,b) => (Number(b.timestamp||0) - Number(a.timestamp||0))).slice(0, 50);
+    const sorted = [...historyData].sort((a,b) => (Number(b.timestamp||0) - Number(a.timestamp||0)));
+    const limit = window.isDashboardHistoryExpanded ? sorted.length : 50;
+    const displayData = sorted.slice(0, limit);
     
-    if (sorted.length === 0) {
+    const titleEl = document.getElementById('dash-history-title');
+    const toggleBtn = document.getElementById('btn-toggle-dash-history');
+    if (titleEl) {
+        titleEl.textContent = window.isDashboardHistoryExpanded ? `Toàn bộ Giao dịch (${sorted.length} GD)` : `Giao dịch gần nhất (50 GD)`;
+    }
+    if (toggleBtn) {
+        toggleBtn.innerHTML = window.isDashboardHistoryExpanded 
+            ? `<i data-lucide="minimize-2" style="width: 14px; height: 14px;"></i> Thu gọn`
+            : `<i data-lucide="list" style="width: 14px; height: 14px;"></i> Xem tất cả`;
+        if (window.lucide) lucide.createIcons();
+    }
+    
+    if (displayData.length === 0) {
         list.innerHTML = '<div style="padding: 24px; text-align: center; color: var(--text-muted);">Chưa có lịch sử giao dịch</div>';
         return;
     }
 
-    sorted.forEach((item, index) => {
+    displayData.forEach((item, index) => {
         let tsStr = item.usedTime || '';
         let createTsStr = 'Không xác định';
         
@@ -4288,14 +4307,45 @@ window.fastCopy = function(elementId) {
     }
 }
 
+window.isDashboardHistoryExpanded = false;
+window.toggleDashboardHistoryLimit = function() {
+    window.isDashboardHistoryExpanded = !window.isDashboardHistoryExpanded;
+    const historyData = window.currentDashboardHistory || [];
+    const isAdminAll = (document.getElementById('dashboard-tenant-select')?.value === 'all') && (currentUserProfile?.role === 'admin');
+    renderDashboardHistory(historyData, isAdminAll);
+}
+
+window.showExportOptionsModal = function() {
+    showModal('export-options-modal');
+}
+
 window.exportDashboardHistoryToExcel = function() {
     if (!window.currentDashboardHistory || window.currentDashboardHistory.length === 0) {
         showToast('Không có dữ liệu để xuất!', 'warning');
+        closeModal('export-options-modal');
+        return;
+    }
+    
+    const range = document.getElementById('export-time-range')?.value || 'all';
+    let filteredData = [...window.currentDashboardHistory];
+    const now = Date.now();
+    
+    if (range === '24h') {
+        filteredData = filteredData.filter(item => (now - Number(item.timestamp||0)) <= 24 * 60 * 60 * 1000);
+    } else if (range === '7d') {
+        filteredData = filteredData.filter(item => (now - Number(item.timestamp||0)) <= 7 * 24 * 60 * 60 * 1000);
+    } else if (range === '30d') {
+        filteredData = filteredData.filter(item => (now - Number(item.timestamp||0)) <= 30 * 24 * 60 * 60 * 1000);
+    }
+    
+    if (filteredData.length === 0) {
+        showToast('Không có giao dịch nào trong khoảng thời gian này!', 'warning');
+        closeModal('export-options-modal');
         return;
     }
     
     try {
-        const sorted = [...window.currentDashboardHistory].sort((a,b) => (Number(b.timestamp||0) - Number(a.timestamp||0)));
+        const sorted = filteredData.sort((a,b) => (Number(b.timestamp||0) - Number(a.timestamp||0)));
         const data = sorted.map(item => {
             let tsStr = item.usedTime || '';
             let createTsStr = 'Không xác định';
@@ -4327,10 +4377,12 @@ window.exportDashboardHistoryToExcel = function() {
         const ws = XLSX.utils.json_to_sheet(data);
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, ws, "Lich_su_OTP");
-        XLSX.writeFile(wb, `Lich_su_OTP_${new Date().toLocaleDateString('vi-VN').replace(/\//g,'-')}.xlsx`);
-        showToast('Đã xuất Excel thành công!', 'success');
+        XLSX.writeFile(wb, `Lich_su_OTP_${range}_${new Date().toLocaleDateString('vi-VN').replace(/\//g,'-')}.xlsx`);
+        showToast(`Đã xuất Excel ${data.length} dòng thành công!`, 'success');
+        closeModal('export-options-modal');
     } catch (e) {
         console.error(e);
         showToast('Lỗi khi xuất Excel: ' + e.message, 'error');
     }
 }
+

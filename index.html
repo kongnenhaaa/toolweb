@@ -20,6 +20,73 @@
 </head>
 
 <body>
+    <canvas id="snow-canvas" style="position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; pointer-events: none; z-index: 9999; opacity: 0.4;"></canvas>
+    <script>
+        (function() {
+            const canvas = document.getElementById('snow-canvas');
+            const ctx = canvas.getContext('2d');
+            let width = canvas.width = window.innerWidth;
+            let height = canvas.height = window.innerHeight;
+            let particles = [];
+            const maxParticles = 150; // Giảm xuống 150 để không quá rối khi dùng dashboard
+
+            window.addEventListener('resize', () => {
+                width = canvas.width = window.innerWidth;
+                height = canvas.height = window.innerHeight;
+            });
+
+            for(let i=0; i<maxParticles; i++) {
+                particles.push({
+                    x: Math.random() * width,
+                    y: Math.random() * height,
+                    r: Math.random() * 2 + 1,
+                    d: Math.random() * maxParticles
+                });
+            }
+
+            let angle = 0;
+            function draw() {
+                ctx.clearRect(0, 0, width, height);
+                ctx.fillStyle = "rgba(255, 255, 255, 0.8)";
+                ctx.beginPath();
+                for(let i=0; i<maxParticles; i++) {
+                    let p = particles[i];
+                    ctx.moveTo(p.x, p.y);
+                    ctx.arc(p.x, p.y, p.r, 0, Math.PI*2, true);
+                }
+                ctx.fill();
+                update();
+            }
+
+            function update() {
+                angle += 0.01;
+                for(let i=0; i<maxParticles; i++) {
+                    let p = particles[i];
+                    p.y += Math.cos(angle + p.d) + 1 + p.r/2;
+                    p.x += Math.sin(angle) * 2;
+
+                    if(p.x > width + 5 || p.x < -5 || p.y > height) {
+                        if(i%3 > 0) {
+                            particles[i] = {x: Math.random()*width, y: -10, r: p.r, d: p.d};
+                        } else {
+                            if(Math.sin(angle) > 0) {
+                                particles[i] = {x: -5, y: Math.random()*height, r: p.r, d: p.d};
+                            } else {
+                                particles[i] = {x: width + 5, y: Math.random()*height, r: p.r, d: p.d};
+                            }
+                        }
+                    }
+                }
+            }
+            
+            function loop() {
+                requestAnimationFrame(loop);
+                draw(); // Luôn chạy vẽ tuyết, kể cả ở trang trong
+            }
+            loop();
+        })();
+    </script>
+
     <!-- Login Container -->
     <div id="login-container"
         style="display: flex; justify-content: center; align-items: center; min-height: 100vh; background: radial-gradient(circle at top right, rgba(59, 130, 246, 0.15), transparent 400px), radial-gradient(circle at bottom left, rgba(0, 104, 255, 0.1), transparent 400px), var(--bg-dark); position: relative; overflow: hidden;">
@@ -30,75 +97,6 @@
         <div
             style="position: absolute; width: 300px; height: 300px; background: rgba(155, 89, 182, 0.15); border-radius: 50%; bottom: -50px; left: -50px; filter: blur(80px); animation: floatBlob 8s infinite ease-in-out alternate-reverse;">
         </div>
-
-        <canvas id="snow-canvas" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 5; opacity: 0.6;"></canvas>
-        <script>
-            (function() {
-                const canvas = document.getElementById('snow-canvas');
-                const ctx = canvas.getContext('2d');
-                let width = canvas.width = window.innerWidth;
-                let height = canvas.height = window.innerHeight;
-                let particles = [];
-                const maxParticles = 300;
-
-                window.addEventListener('resize', () => {
-                    width = canvas.width = window.innerWidth;
-                    height = canvas.height = window.innerHeight;
-                });
-
-                for(let i=0; i<maxParticles; i++) {
-                    particles.push({
-                        x: Math.random() * width,
-                        y: Math.random() * height,
-                        r: Math.random() * 2 + 1,
-                        d: Math.random() * maxParticles
-                    });
-                }
-
-                function draw() {
-                    ctx.clearRect(0, 0, width, height);
-                    ctx.fillStyle = "rgba(255, 255, 255, 0.8)";
-                    ctx.beginPath();
-                    for(let i=0; i<maxParticles; i++) {
-                        let p = particles[i];
-                        ctx.moveTo(p.x, p.y);
-                        ctx.arc(p.x, p.y, p.r, 0, Math.PI*2, true);
-                    }
-                    ctx.fill();
-                    update();
-                }
-
-                let angle = 0;
-                function update() {
-                    angle += 0.01;
-                    for(let i=0; i<maxParticles; i++) {
-                        let p = particles[i];
-                        p.y += Math.cos(angle + p.d) + 1 + p.r/2;
-                        p.x += Math.sin(angle) * 2;
-                        if(p.x > width + 5 || p.x < -5 || p.y > height) {
-                            if(i%3 > 0) {
-                                particles[i] = {x: Math.random()*width, y: -10, r: p.r, d: p.d};
-                            } else {
-                                if(Math.sin(angle) > 0) {
-                                    particles[i] = {x: -5, y: Math.random()*height, r: p.r, d: p.d};
-                                } else {
-                                    particles[i] = {x: width+5, y: Math.random()*height, r: p.r, d: p.d};
-                                }
-                            }
-                        }
-                    }
-                }
-                
-                function loop() {
-                    requestAnimationFrame(loop);
-                    const loginContainer = document.getElementById('login-container');
-                    if (loginContainer && loginContainer.style.display !== 'none') {
-                        draw();
-                    }
-                }
-                loop();
-            })();
-        </script>
 
         <style>
             @keyframes floatBlob {
@@ -897,10 +895,15 @@
                 <!-- History Table -->
                 <div class="grid-container" style="margin-bottom: 24px; max-height: 400px; display: flex; flex-direction: column;">
                     <div style="padding: 16px; border-bottom: 1px solid var(--border-color); font-weight: 600; font-size: 16px; display: flex; justify-content: space-between; align-items: center;">
-                        <span>Giao dịch gần nhất (50 GD)</span>
-                        <button class="btn btn-secondary" onclick="exportDashboardHistoryToExcel()" style="font-size: 12px; padding: 6px 12px; display: flex; align-items: center; gap: 8px;">
-                            <i data-lucide="download" style="width: 14px; height: 14px;"></i> Xuất Excel
-                        </button>
+                        <span id="dash-history-title">Giao dịch gần nhất (50 GD)</span>
+                        <div style="display: flex; gap: 8px;">
+                            <button class="btn btn-outline" id="btn-toggle-dash-history" onclick="toggleDashboardHistoryLimit()" style="font-size: 12px; padding: 6px 12px; display: flex; align-items: center; gap: 8px;">
+                                <i data-lucide="list" style="width: 14px; height: 14px;"></i> Xem tất cả
+                            </button>
+                            <button class="btn btn-secondary" onclick="showExportOptionsModal()" style="font-size: 12px; padding: 6px 12px; display: flex; align-items: center; gap: 8px;">
+                                <i data-lucide="download" style="width: 14px; height: 14px;"></i> Xuất Excel
+                            </button>
+                        </div>
                     </div>
                     <div class="grid-header" id="dash-history-header" style="display: grid; grid-template-columns: 140px 140px 120px 1fr 140px 100px;">
                         <div>Thời gian</div>
@@ -1342,6 +1345,32 @@
 
     <!-- Notification Toast Container -->
     <div id="toast-container" class="toast-container"></div>
+
+    <div class="modal-overlay" id="export-options-modal">
+        <div class="modal" style="width: 400px;">
+            <div class="modal-header">
+                <h2>Tùy chọn Xuất Excel</h2>
+                <button class="close-btn" onclick="closeModal('export-options-modal')"><i data-lucide="x"></i></button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>Chọn khung thời gian muốn xuất dữ liệu:</label>
+                    <select id="export-time-range" class="form-control" style="width: 100%; margin-top: 8px;">
+                        <option value="all">Toàn bộ lịch sử (Không bỏ sót)</option>
+                        <option value="24h">24 giờ qua</option>
+                        <option value="7d">7 ngày qua</option>
+                        <option value="30d">30 ngày qua (1 tháng)</option>
+                    </select>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-outline" onclick="closeModal('export-options-modal')">Hủy</button>
+                <button class="btn btn-success" onclick="exportDashboardHistoryToExcel()">
+                    <i data-lucide="download" style="width:16px;height:16px;"></i> Xuất File XLSX
+                </button>
+            </div>
+        </div>
+    </div>
 
     <!-- Firebase JS SDK (v8 compat cho web thuần không dùng webpack) -->
     <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
