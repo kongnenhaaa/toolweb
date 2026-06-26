@@ -1905,6 +1905,8 @@ document.getElementById('nav-active').addEventListener('click', (e) => {
     if (firefoxView) firefoxView.style.display = 'none';
     const guideView = document.getElementById('guide-view');
     if (guideView) guideView.style.display = 'none';
+    const contactView = document.getElementById('contact-view');
+    if (contactView) contactView.style.display = 'none';
     const adminView = document.getElementById('admin-view');
     if (adminView) adminView.style.display = 'none';
     const dashboardView = document.getElementById('dashboard-view');
@@ -1966,6 +1968,8 @@ document.getElementById('nav-history').addEventListener('click', (e) => {
     if (firefoxView) firefoxView.style.display = 'none';
     const guideView = document.getElementById('guide-view');
     if (guideView) guideView.style.display = 'none';
+    const contactView = document.getElementById('contact-view');
+    if (contactView) contactView.style.display = 'none';
     const adminView = document.getElementById('admin-view');
     if (adminView) adminView.style.display = 'none';
     const dashboardView = document.getElementById('dashboard-view');
@@ -1990,6 +1994,8 @@ if (navFirefoxBtn) {
         document.getElementById('firefox-view').style.display = 'block'; // Or flex if preferred
         const guideView = document.getElementById('guide-view');
         if (guideView) guideView.style.display = 'none';
+        const contactView = document.getElementById('contact-view');
+        if (contactView) contactView.style.display = 'none';
         const adminView = document.getElementById('admin-view');
         if (adminView) adminView.style.display = 'none';
         const dashboardView = document.getElementById('dashboard-view');
@@ -2014,6 +2020,8 @@ if (navGuideBtn) {
         if (firefoxView) firefoxView.style.display = 'none';
         const guideView = document.getElementById('guide-view');
         if (guideView) guideView.style.display = 'block';
+        const contactView = document.getElementById('contact-view');
+        if (contactView) contactView.style.display = 'none';
         const adminView = document.getElementById('admin-view');
         if (adminView) adminView.style.display = 'none';
         const dashboardView = document.getElementById('dashboard-view');
@@ -2037,6 +2045,10 @@ if (navAdminBtn) {
         const guideView = document.getElementById('guide-view');
         if (guideView) guideView.style.display = 'none';
         
+        const contactView = document.getElementById('contact-view');
+        
+        if (contactView) contactView.style.display = 'none';
+        
         const adminView = document.getElementById('admin-view');
         if (adminView) adminView.style.display = 'block';
         const dashboardView = document.getElementById('dashboard-view');
@@ -2059,6 +2071,8 @@ if (navContactBtn) {
         if (firefoxView) firefoxView.style.display = 'none';
         const guideView = document.getElementById('guide-view');
         if (guideView) guideView.style.display = 'none';
+        const contactView = document.getElementById('contact-view');
+        if (contactView) contactView.style.display = 'none';
         const adminView = document.getElementById('admin-view');
         if (adminView) adminView.style.display = 'none';
         const dashboardView = document.getElementById('dashboard-view');
@@ -2084,6 +2098,8 @@ if (navDashboardBtn) {
         if (firefoxView) firefoxView.style.display = 'none';
         const guideView = document.getElementById('guide-view');
         if (guideView) guideView.style.display = 'none';
+        const contactView = document.getElementById('contact-view');
+        if (contactView) contactView.style.display = 'none';
         const contactView = document.getElementById('contact-view');
         if (contactView) contactView.style.display = 'none';
         const adminView = document.getElementById('admin-view');
