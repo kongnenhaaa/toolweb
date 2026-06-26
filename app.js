@@ -2421,7 +2421,7 @@ function renderAdminUsers() {
                     <button class="btn btn-outline" style="padding: 4px 8px; font-size: 11px; color: var(--warning); border-color: var(--warning);" onclick="adminResetPassword('${u.email}')" title="Reset Mật Khẩu"><i data-lucide="key" style="width:14px;height:14px;"></i></button>
                     <button class="btn btn-primary" style="padding: 4px 8px; font-size: 11px;" onclick="viewUserStats('${u.customerId}')" title="Xem Thống Kê"><i data-lucide="pie-chart" style="width:14px;height:14px;"></i></button>
                     <button class="btn btn-primary" style="padding: 4px 8px; font-size: 11px;" onclick="simulateUser('${u.customerId}')" title="Xem Lịch Sử"><i data-lucide="history" style="width:14px;height:14px;"></i></button>
-                    ${!isDeleted ? `<button class="btn btn-outline" style="padding: 4px 8px; font-size: 11px; color: var(--danger); border-color: var(--danger);" onclick="adminDeleteUser('${uid}', true)" title="Xoá Mềm"><i data-lucide="trash-2" style="width:14px;height:14px;"></i></button>` : `<button class="btn btn-outline" style="padding: 4px 8px; font-size: 11px;" onclick="adminDeleteUser('${uid}', false)" title="Khôi phục"><i data-lucide="refresh-cw" style="width:14px;height:14px;"></i></button>`}
+                    <button class="btn btn-outline" style="padding: 4px 8px; font-size: 11px; color: var(--danger); border-color: var(--danger);" onclick="adminDeleteUser('${uid}')" title="Xoá Cứng Vĩnh Viễn"><i data-lucide="trash-2" style="width:14px;height:14px;"></i></button>
                 ` : ''}
             </div>
         `;
@@ -2517,7 +2517,8 @@ window.openAdminLogsModal = async function() {
             switch(item.action) {
                 case 'CREATE_USER': actionText = 'Tạo User mới'; actionColor = 'var(--success)'; break;
                 case 'UPDATE_CONFIG': actionText = 'Sửa Cấu hình'; actionColor = 'var(--primary-color)'; break;
-                case 'SOFT_DELETE': actionText = 'Xoá Mềm'; actionColor = 'var(--danger)'; break;
+                case 'SOFT_DELETE': actionText = 'Xoá Cứng Vĩnh Viễn'; actionColor = 'var(--danger)'; break;
+                case 'HARD_DELETE': actionText = 'Xoá Cứng Vĩnh Viễn'; actionColor = 'var(--danger)'; break;
                 case 'RESTORE_USER': actionText = 'Khôi phục User'; actionColor = 'var(--success)'; break;
                 case 'RESET_PASSWORD': actionText = 'Reset Mật khẩu'; actionColor = 'var(--warning)'; break;
             }
@@ -2612,28 +2613,38 @@ window.adminSaveUserConfig = async function() {
     }
 }
 
-window.adminDeleteUser = async function(uid, setDeleted) {
+window.adminDeleteUser = async function(uid) {
     if (isImpersonating) return showToast('Bạn đang ở chế độ Chỉ Đọc', 'error');
     if (!currentUserProfile || currentUserProfile.role !== 'admin') return;
     const u = adminUsersData[uid];
     if (!u) return;
 
-    if (setDeleted) {
-        if (!(await showConfirm(`Bạn có chắc chắn muốn XOÁ MỀM khách [${u.email}]? Khách sẽ bị mất quyền truy cập hệ thống.`))) return;
-    }
+    if (!(await showConfirm(`CẢNH BÁO: Bạn có chắc chắn muốn XOÁ CỨNG VĨNH VIỄN khách [${u.email}] và toàn bộ dữ liệu của họ? Hành động này sẽ xoá sạch lịch sử OTP và không thể khôi phục.`))) return;
 
     try {
-        await db.ref(`users/${uid}/deleted`).set(setDeleted);
-        // Tự động vô hiệu hoá hoặc kích hoạt
-        await db.ref(`users/${uid}/active`).set(!setDeleted);
+        // Remove tenant history if exists
+        if (u.customerId) {
+            await db.ref(`tenants/${u.customerId}`).remove();
+        }
+        
+        // Remove all ports belonging to this user
+        const portsSnap = await db.ref('ports').orderByChild('ownerUid').equalTo(uid).once('value');
+        if (portsSnap.exists()) {
+            const updates = {};
+            portsSnap.forEach(child => { updates[child.key] = null; });
+            await db.ref('ports').update(updates);
+        }
+        
+        // Finally remove user profile
+        await db.ref(`users/${uid}`).remove();
         
         await db.ref('admin_logs').push({
-            action: setDeleted ? 'SOFT_DELETE' : 'RESTORE_USER',
+            action: 'HARD_DELETE',
             targetUid: uid,
             by: auth.currentUser.uid,
             timestamp: Date.now()
         });
-        showToast(setDeleted ? 'Đã xoá mềm thành công!' : 'Đã khôi phục thành công!');
+        showToast('Đã xoá cứng vĩnh viễn tài khoản và toàn bộ dữ liệu!');
     } catch (e) {
         showToast('Lỗi thao tác: ' + e.message, 'error');
     }
@@ -4121,33 +4132,40 @@ window.renderDashboardCharts = function() {
     const now = new Date();
     
     if (range === 'today') {
-        // 24 hours
+        // 24 hours of current calendar day
+        const dTodayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
         const hourlyCounts = new Array(24).fill(0);
         historyData.forEach(item => {
             let ts = Number(item.timestamp || 0);
-            if (ts > 0 && (now.getTime() - ts) <= 24*60*60*1000) {
+            if (ts >= dTodayStart && ts <= now.getTime()) {
                 hourlyCounts[new Date(ts).getHours()]++;
             }
         });
         for (let i=0; i<24; i++) { labels.push(i+'h'); counts.push(hourlyCounts[i]); }
     } else {
-        // 7 or 30 days
+        // 7 or 30 days based on calendar dates
         const days = range === '7days' ? 7 : 30;
+        const dToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        
         for (let i = days - 1; i >= 0; i--) {
-            const d = new Date(now);
+            const d = new Date(dToday);
             d.setDate(d.getDate() - i);
             labels.push(d.toLocaleDateString('vi-VN', {day:'2-digit', month:'2-digit'}));
             counts.push(0);
         }
-        const startOfRange = new Date(now);
+        
+        const startOfRange = new Date(dToday);
         startOfRange.setDate(startOfRange.getDate() - days + 1);
-        startOfRange.setHours(0,0,0,0);
         
         historyData.forEach(item => {
             let ts = Number(item.timestamp || 0);
             if (ts >= startOfRange.getTime()) {
-                const diffDays = Math.floor((now.getTime() - ts) / (1000*60*60*24));
-                if (diffDays >= 0 && diffDays < days) counts[days - 1 - diffDays]++;
+                const itemDate = new Date(ts);
+                const itemDayStart = new Date(itemDate.getFullYear(), itemDate.getMonth(), itemDate.getDate());
+                const diffDays = Math.round((dToday.getTime() - itemDayStart.getTime()) / (1000*60*60*24));
+                if (diffDays >= 0 && diffDays < days) {
+                    counts[days - 1 - diffDays]++;
+                }
             }
         });
     }
