@@ -13,10 +13,341 @@
         rel="stylesheet">
     <!-- Lucide Icons -->
     <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- SheetJS for Excel Export -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
 </head>
 
 <body>
-    <div class="app-container">
+    <!-- Login Container -->
+    <div id="login-container"
+        style="display: flex; justify-content: center; align-items: center; min-height: 100vh; background: radial-gradient(circle at top right, rgba(59, 130, 246, 0.15), transparent 400px), radial-gradient(circle at bottom left, rgba(0, 104, 255, 0.1), transparent 400px), var(--bg-dark); position: relative; overflow: hidden;">
+        <!-- Animated Blobs -->
+        <div
+            style="position: absolute; width: 400px; height: 400px; background: rgba(59, 130, 246, 0.2); border-radius: 50%; top: -100px; right: -100px; filter: blur(100px); animation: floatBlob 10s infinite ease-in-out alternate;">
+        </div>
+        <div
+            style="position: absolute; width: 300px; height: 300px; background: rgba(155, 89, 182, 0.15); border-radius: 50%; bottom: -50px; left: -50px; filter: blur(80px); animation: floatBlob 8s infinite ease-in-out alternate-reverse;">
+        </div>
+
+        <canvas id="snow-canvas" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 5; opacity: 0.6;"></canvas>
+        <script>
+            (function() {
+                const canvas = document.getElementById('snow-canvas');
+                const ctx = canvas.getContext('2d');
+                let width = canvas.width = window.innerWidth;
+                let height = canvas.height = window.innerHeight;
+                let particles = [];
+                const maxParticles = 300;
+
+                window.addEventListener('resize', () => {
+                    width = canvas.width = window.innerWidth;
+                    height = canvas.height = window.innerHeight;
+                });
+
+                for(let i=0; i<maxParticles; i++) {
+                    particles.push({
+                        x: Math.random() * width,
+                        y: Math.random() * height,
+                        r: Math.random() * 2 + 1,
+                        d: Math.random() * maxParticles
+                    });
+                }
+
+                function draw() {
+                    ctx.clearRect(0, 0, width, height);
+                    ctx.fillStyle = "rgba(255, 255, 255, 0.8)";
+                    ctx.beginPath();
+                    for(let i=0; i<maxParticles; i++) {
+                        let p = particles[i];
+                        ctx.moveTo(p.x, p.y);
+                        ctx.arc(p.x, p.y, p.r, 0, Math.PI*2, true);
+                    }
+                    ctx.fill();
+                    update();
+                }
+
+                let angle = 0;
+                function update() {
+                    angle += 0.01;
+                    for(let i=0; i<maxParticles; i++) {
+                        let p = particles[i];
+                        p.y += Math.cos(angle + p.d) + 1 + p.r/2;
+                        p.x += Math.sin(angle) * 2;
+                        if(p.x > width + 5 || p.x < -5 || p.y > height) {
+                            if(i%3 > 0) {
+                                particles[i] = {x: Math.random()*width, y: -10, r: p.r, d: p.d};
+                            } else {
+                                if(Math.sin(angle) > 0) {
+                                    particles[i] = {x: -5, y: Math.random()*height, r: p.r, d: p.d};
+                                } else {
+                                    particles[i] = {x: width+5, y: Math.random()*height, r: p.r, d: p.d};
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                function loop() {
+                    requestAnimationFrame(loop);
+                    const loginContainer = document.getElementById('login-container');
+                    if (loginContainer && loginContainer.style.display !== 'none') {
+                        draw();
+                    }
+                }
+                loop();
+            })();
+        </script>
+
+        <style>
+            @keyframes floatBlob {
+                0% {
+                    transform: translateY(0) scale(1);
+                }
+
+                100% {
+                    transform: translateY(30px) scale(1.1);
+                }
+            }
+
+            @keyframes pulseLogo {
+                0% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.4); transform: scale(1); }
+                70% { box-shadow: 0 0 0 15px rgba(59, 130, 246, 0); transform: scale(1.02); }
+                100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0); transform: scale(1); }
+            }
+
+            .login-glass {
+                background: rgba(15, 16, 22, 0.7);
+                backdrop-filter: blur(20px);
+                -webkit-backdrop-filter: blur(20px);
+                border: 1px solid rgba(255, 255, 255, 0.1);
+                box-shadow: 0 0 30px rgba(59, 130, 246, 0.15), 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+                padding: 40px;
+                border-radius: 20px;
+                width: 400px;
+                max-width: 90vw;
+                position: relative;
+                z-index: 10;
+            }
+
+            .login-input {
+                width: 100%;
+                background: rgba(255, 255, 255, 0.03);
+                border: 1px solid rgba(255, 255, 255, 0.1);
+                border-radius: 10px;
+                padding: 12px 16px;
+                color: var(--text-main);
+                font-family: inherit;
+                font-size: 14px;
+                transition: all 0.3s ease;
+                outline: none;
+            }
+
+            .login-input:hover {
+                border-color: rgba(255, 255, 255, 0.25);
+                background: rgba(255, 255, 255, 0.05);
+            }
+
+            .login-input:focus {
+                border-color: var(--primary-color);
+                background: rgba(255, 255, 255, 0.06);
+                box-shadow: 0 0 15px rgba(59, 130, 246, 0.3), 0 0 0 1px var(--primary-color);
+            }
+
+            .login-btn {
+                width: 100%;
+                justify-content: center;
+                padding: 14px;
+                font-size: 15px;
+                border-radius: 10px;
+                transition: all 0.3s ease;
+                font-weight: 600;
+                cursor: pointer;
+                display: flex;
+                align-items: center;
+                gap: 8px;
+            }
+
+            .login-btn-primary {
+                background: linear-gradient(135deg, var(--primary-color), var(--zalo-hover));
+                color: white;
+                border: none;
+                box-shadow: 0 4px 15px rgba(59, 130, 246, 0.3);
+            }
+
+            .login-btn-primary:hover {
+                transform: translateY(-2px);
+                box-shadow: 0 6px 20px rgba(59, 130, 246, 0.4);
+            }
+
+            .login-btn-outline {
+                background: transparent;
+                border: 1px solid rgba(255, 255, 255, 0.2);
+                color: var(--text-main);
+            }
+
+            .login-btn-outline:hover {
+                background: rgba(255, 255, 255, 0.05);
+                border-color: rgba(255, 255, 255, 0.3);
+            }
+
+            /* Custom Confirm Modal Styles */
+            .confirm-overlay {
+                position: fixed;
+                top: 0; left: 0; width: 100vw; height: 100vh;
+                background: rgba(0, 0, 0, 0.6);
+                backdrop-filter: blur(4px);
+                z-index: 9999;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                opacity: 0;
+                pointer-events: none;
+                transition: opacity 0.2s ease;
+            }
+            .confirm-overlay.active {
+                opacity: 1;
+                pointer-events: auto;
+            }
+            .confirm-box {
+                background: white;
+                color: #111;
+                width: 400px;
+                max-width: 90vw;
+                border-radius: 12px;
+                padding: 24px;
+                box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+                transform: scale(0.95) translateY(10px);
+                transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+                opacity: 0;
+            }
+            .confirm-overlay.active .confirm-box {
+                transform: scale(1) translateY(0);
+                opacity: 1;
+            }
+            .confirm-header {
+                font-size: 16px;
+                font-weight: 600;
+                margin-bottom: 12px;
+                color: #374151;
+            }
+            .confirm-body {
+                font-size: 14px;
+                color: #4b5563;
+                margin-bottom: 24px;
+                line-height: 1.5;
+            }
+            .confirm-actions {
+                display: flex;
+                justify-content: flex-end;
+                gap: 12px;
+            }
+            .btn-confirm-ok {
+                background: #1f2937;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 6px;
+                font-weight: 500;
+                cursor: pointer;
+                transition: background 0.2s;
+            }
+            .btn-confirm-ok:hover {
+                background: #111827;
+            }
+            .btn-confirm-cancel {
+                background: white;
+                color: #374151;
+                border: 1px solid #d1d5db;
+                padding: 8px 16px;
+                border-radius: 6px;
+                font-weight: 500;
+                cursor: pointer;
+                transition: background 0.2s;
+            }
+            .btn-confirm-cancel:hover {
+                background: #f3f4f6;
+            }
+        </style>
+
+        <div class="login-glass">
+            <div style="text-align: center; margin-bottom: 32px;">
+                <div
+                    style="display: inline-flex; align-items: center; justify-content: center; width: 64px; height: 64px; border-radius: 16px; background: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.2); margin-bottom: 16px; animation: pulseLogo 3s infinite ease-in-out;">
+                    <i data-lucide="cpu" style="width: 32px; height: 32px; color: var(--primary-color);"></i>
+                </div>
+                <h2 style="font-family: 'Outfit', sans-serif; font-size: 28px; font-weight: 700; margin-bottom: 8px;">
+                    GSM PRO</h2>
+                <p style="color: var(--text-muted); font-size: 14px;">Hệ thống quản lý SMS tự động</p>
+            </div>
+
+            <div class="form-group" style="margin-bottom: 20px;">
+                <label
+                    style="font-size: 13px; font-weight: 500; color: var(--text-muted); margin-bottom: 8px; display: block;">Email
+                    đăng nhập</label>
+                <div style="position: relative;">
+                    <i data-lucide="mail"
+                        style="position: absolute; left: 14px; top: 50%; transform: translateY(-50%); width: 18px; height: 18px; color: var(--text-muted);"></i>
+                    <input type="email" id="auth-email" class="login-input" placeholder="admin@example.com"
+                        style="padding-left: 42px;">
+                </div>
+            </div>
+
+            <div class="form-group" style="margin-bottom: 24px;">
+                <label
+                    style="font-size: 13px; font-weight: 500; color: var(--text-muted); margin-bottom: 8px; display: block;">Mật
+                    khẩu</label>
+                <div style="position: relative;">
+                    <i data-lucide="lock"
+                        style="position: absolute; left: 14px; top: 50%; transform: translateY(-50%); width: 18px; height: 18px; color: var(--text-muted);"></i>
+                    <input type="password" id="auth-password" class="login-input" placeholder="••••••••"
+                        style="padding-left: 42px; padding-right: 42px;" onkeypress="if(event.key === 'Enter') loginWithEmail()">
+                    <button onclick="togglePassword()" style="position: absolute; right: 14px; top: 50%; transform: translateY(-50%); background: none; border: none; padding: 0; color: var(--text-muted); cursor: pointer; transition: color 0.2s;">
+                        <i id="toggle-pwd-icon" data-lucide="eye" style="width: 18px; height: 18px;"></i>
+                    </button>
+                </div>
+                <div id="login-error-text" style="color: var(--danger); font-size: 12px; margin-top: 8px; display: none; text-align: left;"></div>
+            </div>
+
+            <div style="display: flex; flex-direction: column; gap: 12px;">
+                <button id="btn-login-submit" class="btn login-btn login-btn-primary" onclick="loginWithEmail()">
+                    <i data-lucide="log-in" style="width: 18px; height: 18px;"></i> <span id="login-btn-text">Đăng nhập</span>
+                </button>
+            </div>
+            
+            <p style="font-size: 12px; text-align: center; color: var(--text-muted); margin-top: 24px; opacity: 0.7;">Tài khoản được cấp bởi quản trị viên.</p>
+        </div>
+
+        <script>
+            function togglePassword() {
+                const pwdInput = document.getElementById('auth-password');
+                const icon = document.getElementById('toggle-pwd-icon');
+                if (pwdInput.type === 'password') {
+                    pwdInput.type = 'text';
+                    icon.setAttribute('data-lucide', 'eye-off');
+                } else {
+                    pwdInput.type = 'password';
+                    icon.setAttribute('data-lucide', 'eye');
+                }
+                if (window.lucide) lucide.createIcons();
+            }
+        </script>
+    </div>
+
+    <!-- Custom Confirm Modal -->
+    <div class="confirm-overlay" id="custom-confirm-modal">
+        <div class="confirm-box">
+            <div class="confirm-header">Hệ thống thông báo</div>
+            <div class="confirm-body" id="custom-confirm-message"></div>
+            <div class="confirm-actions">
+                <button class="btn-confirm-cancel" id="custom-confirm-cancel">Huỷ</button>
+                <button class="btn-confirm-ok" id="custom-confirm-ok">Đồng ý</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="app-container" id="main-app" style="display: none;">
         <!-- Sidebar -->
         <aside class="sidebar">
             <div class="logo" id="logo-home" style="cursor: pointer;">
@@ -28,6 +359,7 @@
                     <i data-lucide="smartphone"></i>
                     API GSM Local
                 </a>
+
                 <a href="#" class="nav-item" id="nav-firefox">
                     <i data-lucide="globe"></i>
                     Firefox API
@@ -39,6 +371,14 @@
                 <a href="#" class="nav-item" onclick="openSettingsModal(); return false;">
                     <i data-lucide="settings"></i>
                     Cài đặt
+                </a>
+                <a href="#" class="nav-item" id="nav-admin" style="display: none;">
+                    <i data-lucide="users"></i>
+                    Quản lý Khách
+                </a>
+                <a href="#" class="nav-item" id="nav-dashboard">
+                    <i data-lucide="pie-chart"></i>
+                    Thống kê
                 </a>
                 <a href="#" class="nav-item" id="nav-guide">
                     <i data-lucide="book-open"></i>
@@ -58,6 +398,9 @@
 
         <!-- Main Content -->
         <main class="main-content">
+            <div id="impersonation-banner" style="display: none; background-color: var(--warning); color: #000; padding: 10px 16px; font-weight: 600; font-family: 'Outfit', sans-serif; text-align: center; border-radius: 8px; margin-bottom: 16px;">
+                ĐANG XEM DỮ LIỆU KHÁCH [ID] (CHẾ ĐỘ CHỈ ĐỌC) - Vui lòng F5 trang web để thoát.
+            </div>
             <header class="top-bar">
                 <div class="actions">
                     <div id="top-bar-controls" style="display: flex; align-items: center; gap: 8px;">
@@ -81,6 +424,9 @@
                         </button>
                         <button class="btn btn-secondary" onclick="simulateIncomingOtp()">
                             <i data-lucide="test-tube"></i> Test OTP
+                        </button>
+                        <button class="btn btn-outline" onclick="logout()" style="margin-left: auto;">
+                            <i data-lucide="log-out"></i> Đăng xuất
                         </button>
                     </div>
 
@@ -228,7 +574,8 @@
                         <span id="firefox-integral"
                             style="display: none; padding: 8px 16px; background: rgba(155, 89, 182, 0.1); color: #9b59b6; border-radius: 6px; font-weight: 600; border: 1px solid rgba(155, 89, 182, 0.2);">Điểm:
                             0</span>
-                        <button class="btn btn-outline" onclick="firefoxCheckBalance()" style="display: none; background: rgba(255,255,255,0.05); color: var(--text-main); border: 1px solid var(--border-color);">
+                        <button class="btn btn-outline" onclick="firefoxCheckBalance()"
+                            style="display: none; background: rgba(255,255,255,0.05); color: var(--text-main); border: 1px solid var(--border-color);">
                             <i data-lucide="refresh-cw"></i> Cập nhật số dư
                         </button>
                         <button class="btn btn-primary" onclick="firefoxGetPhone()">
@@ -296,86 +643,496 @@
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
                     <h2 style="font-family: 'Outfit', sans-serif; font-size: 20px;">Hướng dẫn sử dụng hệ thống</h2>
                 </div>
-                <div style="background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); border-radius: 8px; padding: 20px; line-height: 1.6; max-height: calc(100vh - 150px); overflow-y: auto;">
+                <div
+                    style="background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); border-radius: 8px; padding: 20px; line-height: 1.6; max-height: calc(100vh - 150px); overflow-y: auto;">
                     <h3 style="color: var(--text-main); margin-top: 0;">1. Hướng dẫn sử dụng tab "API GSM Local"</h3>
                     <p style="color: var(--text-muted);">
-                        Hệ thống GSM kết nối trực tiếp với phần cứng cắm SIM để tự động lấy OTP từ các SIM gắn trên thiết bị của bạn. Tab "API GSM Local" hiển thị danh sách các cổng (port) hiện đang hoạt động trực tiếp trên máy tính.
+                        Hệ thống GSM kết nối trực tiếp với phần cứng cắm SIM để tự động lấy OTP từ các SIM gắn trên
+                        thiết bị của bạn. Tab "API GSM Local" hiển thị danh sách các cổng (port) hiện đang hoạt động
+                        trực tiếp trên máy tính.
                     </p>
-                    <p style="color: var(--text-main); font-weight: 600; margin-top: 12px; margin-bottom: 8px;">Các bước thực hiện gửi tin nhắn và nhận OTP:</p>
+                    <p style="color: var(--text-main); font-weight: 600; margin-top: 12px; margin-bottom: 8px;">Các bước
+                        thực hiện gửi tin nhắn và nhận OTP:</p>
                     <ul style="color: var(--text-muted); margin-left: 20px;">
-                        <li style="margin-bottom: 8px;"><strong>Bước 1 (Chọn cổng):</strong> Tại màn hình chính, xem danh sách các cổng đang hiển thị chữ "ONLINE" màu xanh (sẵn sàng hoạt động).</li>
-                        <li style="margin-bottom: 8px;"><strong>Bước 2 (Gửi SMS):</strong> Ở cột "Hành Động" của port tương ứng, bấm vào nút <strong>Gửi SMS</strong>. Nhập Số điện thoại người nhận và Nội dung tin nhắn cần gửi, sau đó bấm "Gửi".</li>
-                        <li style="margin-bottom: 8px;"><strong>Bước 3 (Đợi OTP/SMS đến):</strong> Sử dụng số điện thoại của SIM đang cắm để đăng ký tài khoản. Khi có tin nhắn gửi về SIM, hệ thống sẽ <strong>tự động quét và cập nhật nội dung tin nhắn cùng mã OTP</strong> vào cột "SMS / OTP" ngay lập tức mà không cần bấm tải lại trang.</li>
-                        <li style="margin-bottom: 8px;"><strong>Các tính năng khác:</strong> Nút "USSD" để chạy lệnh USSD (như *101#) giúp kiểm tra số dư SIM; nút "Đổi mạng" để ngắt và kết nối lại sóng điện thoại của SIM.</li>
+                        <li style="margin-bottom: 8px;"><strong>Bước 1 (Chọn cổng):</strong> Tại màn hình chính, xem
+                            danh sách các cổng đang hiển thị chữ "ONLINE" màu xanh (sẵn sàng hoạt động).</li>
+                        <li style="margin-bottom: 8px;"><strong>Bước 2 (Gửi SMS):</strong> Ở cột "Hành Động" của port
+                            tương ứng, bấm vào nút <strong>Gửi SMS</strong>. Nhập Số điện thoại người nhận và Nội dung
+                            tin nhắn cần gửi, sau đó bấm "Gửi".</li>
+                        <li style="margin-bottom: 8px;"><strong>Bước 3 (Đợi OTP/SMS đến):</strong> Sử dụng số điện thoại
+                            của SIM đang cắm để đăng ký tài khoản. Khi có tin nhắn gửi về SIM, hệ thống sẽ <strong>tự
+                                động quét và cập nhật nội dung tin nhắn cùng mã OTP</strong> vào cột "SMS / OTP" ngay
+                            lập tức mà không cần bấm tải lại trang.</li>
+                        <li style="margin-bottom: 8px;"><strong>Các tính năng khác:</strong> Nút "USSD" để chạy lệnh
+                            USSD (như *101#) giúp kiểm tra số dư SIM; nút "Đổi mạng" để ngắt và kết nối lại sóng điện
+                            thoại của SIM.</li>
                     </ul>
-                    
+
                     <h3 style="color: var(--text-main); margin-top: 24px;">2. Cách sử dụng tab "Firefox API"</h3>
                     <p style="color: var(--text-muted);">
-                        Khác với API GSM Local sử dụng SIM thật của bạn, Firefox API là dịch vụ thuê số ảo bên thứ 3. Bạn sẽ được cấp số điện thoại ngẫu nhiên để nhận SMS/OTP tự động.
+                        Khác với API GSM Local sử dụng SIM thật của bạn, Firefox API là dịch vụ thuê số ảo bên thứ 3.
+                        Bạn sẽ được cấp số điện thoại ngẫu nhiên để nhận SMS/OTP tự động.
                     </p>
-                    <p style="color: var(--text-main); font-weight: 600; margin-top: 12px; margin-bottom: 8px;">Các bước thuê số và nhận OTP:</p>
+                    <p style="color: var(--text-main); font-weight: 600; margin-top: 12px; margin-bottom: 8px;">Các bước
+                        thuê số và nhận OTP:</p>
                     <ul style="color: var(--text-muted); margin-left: 20px;">
-                        <li style="margin-bottom: 8px;"><strong>Bước 1 (Kiểm tra số dư):</strong> Bấm nút <strong>Cập nhật số dư</strong> góc phải trên cùng để xem số tiền hiện tại trong tài khoản Firefox API của bạn.</li>
-                        <li style="margin-bottom: 8px;"><strong>Bước 2 (Thuê số):</strong> Bấm <strong>Thuê Số Mới</strong>. Hệ thống sẽ tự động gọi API và cấp cho bạn một số điện thoại mới. Số mới sẽ xuất hiện trong bảng danh sách phía dưới với trạng thái "Đang chờ".</li>
-                        <li style="margin-bottom: 8px;"><strong>Bước 3 (Sử dụng & Nhận OTP):</strong> Copy số điện thoại vừa lấy để đăng ký dịch vụ cần thiết. Khi dịch vụ gửi OTP về, mã sẽ <strong>tự động xuất hiện</strong> ở cột "OTP / SMS" trên bảng.</li>
-                        <li style="margin-bottom: 8px;"><strong>Hủy số:</strong> Nếu số bị lỗi không nhận được OTP, bạn có thể bấm nút <strong>Hủy (Release)</strong> để trả số và không bị trừ tiền (tuỳ chính sách của Firefox API).</li>
+                        <li style="margin-bottom: 8px;"><strong>Bước 1 (Kiểm tra số dư):</strong> Bấm nút <strong>Cập
+                                nhật số dư</strong> góc phải trên cùng để xem số tiền hiện tại trong tài khoản Firefox
+                            API của bạn.</li>
+                        <li style="margin-bottom: 8px;"><strong>Bước 2 (Thuê số):</strong> Bấm <strong>Thuê Số
+                                Mới</strong>. Hệ thống sẽ tự động gọi API và cấp cho bạn một số điện thoại mới. Số mới
+                            sẽ xuất hiện trong bảng danh sách phía dưới với trạng thái "Đang chờ".</li>
+                        <li style="margin-bottom: 8px;"><strong>Bước 3 (Sử dụng & Nhận OTP):</strong> Copy số điện thoại
+                            vừa lấy để đăng ký dịch vụ cần thiết. Khi dịch vụ gửi OTP về, mã sẽ <strong>tự động xuất
+                                hiện</strong> ở cột "OTP / SMS" trên bảng.</li>
+                        <li style="margin-bottom: 8px;"><strong>Hủy số:</strong> Nếu số bị lỗi không nhận được OTP, bạn
+                            có thể bấm nút <strong>Hủy (Release)</strong> để trả số và không bị trừ tiền (tuỳ chính sách
+                            của Firefox API).</li>
                     </ul>
 
                     <h3 style="color: var(--text-main); margin-top: 24px;">3. Ý nghĩa Trạng thái & Màu sắc Cổng</h3>
                     <ul style="color: var(--text-muted); margin-left: 20px;">
-                        <li style="margin-bottom: 8px;"><strong><span style="color: var(--success)">ONLINE (Xanh lá):</span></strong> Cổng sẵn sàng hoạt động. Bạn nên ưu tiên thao tác trên các cổng này.</li>
-                        <li style="margin-bottom: 8px;"><strong><span style="color: var(--warning)">WAITING (Vàng):</span></strong> Cổng đang chờ nhận OTP. Không nên thao tác gì thêm cho đến khi nhận xong.</li>
-                        <li style="margin-bottom: 8px;"><strong><span style="color: var(--primary-color)">OTP (Xanh dương):</span></strong> Cổng vừa nhận được OTP/SMS mới. Có thể sử dụng xong và ẩn đi.</li>
-                        <li style="margin-bottom: 8px;"><strong><span style="color: var(--danger)">ERROR / OFFLINE (Đỏ/Xám):</span></strong> Cổng đang lỗi hoặc mất kết nối. Hãy bỏ qua hoặc thử nút "Đổi mạng".</li>
+                        <li style="margin-bottom: 8px;"><strong><span style="color: var(--success)">ONLINE (Xanh
+                                    lá):</span></strong> Cổng sẵn sàng hoạt động. Bạn nên ưu tiên thao tác trên các cổng
+                            này.</li>
+                        <li style="margin-bottom: 8px;"><strong><span style="color: var(--warning)">WAITING
+                                    (Vàng):</span></strong> Cổng đang chờ nhận OTP. Không nên thao tác gì thêm cho đến
+                            khi nhận xong.</li>
+                        <li style="margin-bottom: 8px;"><strong><span style="color: var(--primary-color)">OTP (Xanh
+                                    dương):</span></strong> Cổng vừa nhận được OTP/SMS mới. Có thể sử dụng xong và ẩn
+                            đi.</li>
+                        <li style="margin-bottom: 8px;"><strong><span style="color: var(--danger)">ERROR / OFFLINE
+                                    (Đỏ/Xám):</span></strong> Cổng đang lỗi hoặc mất kết nối. Hãy bỏ qua hoặc thử nút
+                            "Đổi mạng".</li>
                     </ul>
 
                     <h3 style="color: var(--text-main); margin-top: 24px;">4. Làm việc Nhóm (Tránh đụng cổng)</h3>
                     <p style="color: var(--text-muted);">
-                        Hệ thống hỗ trợ tự động chia đều cổng nếu có nhiều người cùng làm để tránh việc 2 người lấy cùng 1 số.
+                        Hệ thống hỗ trợ tự động chia đều cổng nếu có nhiều người cùng làm để tránh việc 2 người lấy cùng
+                        1 số.
                     </p>
                     <ul style="color: var(--text-muted); margin-left: 20px;">
-                        <li style="margin-bottom: 8px;">Trên thanh công cụ, nhập <strong>Tổng số người làm</strong> và chọn <strong>Phần của tôi</strong> (Ví dụ: Bạn là người 1, bạn của bạn là người 2).</li>
-                        <li style="margin-bottom: 8px;">Hệ thống sẽ <strong>tự động ẩn các cổng của người khác</strong>. Bạn chỉ nhìn thấy và làm việc trên đúng phần sim được chia cho mình.</li>
-                        <li style="margin-bottom: 8px;">Bạn có thể kết hợp thêm <strong>Bộ lọc (Filter)</strong> để lọc riêng các cổng thỏa mãn điều kiện: theo máy tính kết nối, nhà mạng, hoặc số dư > 5000đ.</li>
+                        <li style="margin-bottom: 8px;">Trên thanh công cụ, nhập <strong>Tổng số người làm</strong> và
+                            chọn <strong>Phần của tôi</strong> (Ví dụ: Bạn là người 1, bạn của bạn là người 2).</li>
+                        <li style="margin-bottom: 8px;">Hệ thống sẽ <strong>tự động ẩn các cổng của người khác</strong>.
+                            Bạn chỉ nhìn thấy và làm việc trên đúng phần sim được chia cho mình.</li>
+                        <li style="margin-bottom: 8px;">Bạn có thể kết hợp thêm <strong>Bộ lọc (Filter)</strong> để lọc
+                            riêng các cổng thỏa mãn điều kiện: theo máy tính kết nối, nhà mạng, hoặc số dư > 5000đ.</li>
                     </ul>
 
                     <h3 style="color: var(--text-main); margin-top: 24px;">5. Các nút Thao tác Hàng loạt</h3>
                     <ul style="color: var(--text-muted); margin-left: 20px;">
-                        <li style="margin-bottom: 8px;"><strong>Kiểm tra TKC tất cả:</strong> Chạy tự động USSD (ví dụ *101#) cho mọi cổng để lấy số dư mà không cần bấm tay từng cái. Rất hữu ích khi cần rà soát sim.</li>
-                        <li style="margin-bottom: 8px;"><strong>Hủy chờ tất cả:</strong> Dọn dẹp trạng thái WAITING của mọi cổng bị treo (khi chờ OTP quá lâu mà không về), đưa chúng về ONLINE.</li>
-                        <li style="margin-bottom: 8px;"><strong>Khôi phục tất cả cổng ẩn:</strong> Mở lại những cổng mà bạn đã lỡ tay bấm "Ẩn cổng" trong quá trình làm việc.</li>
+                        <li style="margin-bottom: 8px;"><strong>Kiểm tra TKC tất cả:</strong> Chạy tự động USSD (ví dụ
+                            *101#) cho mọi cổng để lấy số dư mà không cần bấm tay từng cái. Rất hữu ích khi cần rà soát
+                            sim.</li>
+                        <li style="margin-bottom: 8px;"><strong>Hủy chờ tất cả:</strong> Dọn dẹp trạng thái WAITING của
+                            mọi cổng bị treo (khi chờ OTP quá lâu mà không về), đưa chúng về ONLINE.</li>
+                        <li style="margin-bottom: 8px;"><strong>Khôi phục tất cả cổng ẩn:</strong> Mở lại những cổng mà
+                            bạn đã lỡ tay bấm "Ẩn cổng" trong quá trình làm việc.</li>
                     </ul>
 
                     <h3 style="color: var(--text-main); margin-top: 24px;">6. Theo dõi Lỗi, Command Monitor & Khác</h3>
                     <ul style="color: var(--text-muted); margin-left: 20px;">
-                        <li style="margin-bottom: 8px;"><strong>Command Monitor:</strong> Hiển thị nhật ký realtime của các lệnh AT giao tiếp với phần cứng. Giúp bạn biết hệ thống đang kẹt lệnh nào.</li>
-                        <li style="margin-bottom: 8px;"><strong>Lỗi Cần Xử Lý:</strong> Nơi tập hợp các cảnh báo nóng (Sim hỏng, hết tiền, mất sóng). Bạn nên nhìn vào đây để thay sim kịp thời.</li>
-                        <li style="margin-bottom: 8px;"><strong>Ghi chú & Âm báo:</strong> Dùng ô <em>Ghi chú</em> bên menu trái để giao việc nhanh. Bật icon hình cái chuông trên top bar nếu bạn muốn có âm thanh ting ting báo hiệu khi có OTP.</li>
+                        <li style="margin-bottom: 8px;"><strong>Command Monitor:</strong> Hiển thị nhật ký realtime của
+                            các lệnh AT giao tiếp với phần cứng. Giúp bạn biết hệ thống đang kẹt lệnh nào.</li>
+                        <li style="margin-bottom: 8px;"><strong>Lỗi Cần Xử Lý:</strong> Nơi tập hợp các cảnh báo nóng
+                            (Sim hỏng, hết tiền, mất sóng). Bạn nên nhìn vào đây để thay sim kịp thời.</li>
+                        <li style="margin-bottom: 8px;"><strong>Ghi chú & Âm báo:</strong> Dùng ô <em>Ghi chú</em> bên
+                            menu trái để giao việc nhanh. Bật icon hình cái chuông trên top bar nếu bạn muốn có âm thanh
+                            ting ting báo hiệu khi có OTP.</li>
                     </ul>
 
-                    <h3 style="color: var(--text-main); margin-top: 24px;">7. Quy trình chuẩn 30 giây (Thực hành nhanh)</h3>
+                    <h3 style="color: var(--text-main); margin-top: 24px;">7. Quy trình chuẩn 30 giây (Thực hành nhanh)
+                    </h3>
                     <ul style="color: var(--text-muted); margin-left: 20px;">
-                        <li style="margin-bottom: 8px;"><strong>B1 - Chọn cổng:</strong> Nhìn vào danh sách, tìm cổng đang hiển thị ONLINE (Xanh lá) và copy số điện thoại.</li>
-                        <li style="margin-bottom: 8px;"><strong>B2 - Gửi SMS:</strong> Bấm <em>Gửi SMS</em>, điền SĐT tổng đài và cú pháp dịch vụ rồi bấm Gửi.</li>
-                        <li style="margin-bottom: 8px;"><strong>B3 - Chờ OTP:</strong> Cổng tự động chuyển sang WAITING (Vàng). Khi tin nhắn về, mã OTP sẽ tự hiện và nhấp nháy màu Xanh dương.</li>
-                        <li style="margin-bottom: 8px;"><strong>B4 - Lưu trữ:</strong> Sử dụng mã OTP xong, bấm nút <em>Lưu lịch sử & Ẩn</em> để cất mã đi và giải phóng không gian màn hình.</li>
-                        <li style="margin-bottom: 8px;"><strong>B5 - Tra cứu:</strong> Sang tab <em>Lịch sử OTP</em> để xem lại toàn bộ các mã đã lưu hoặc xuất ra file Excel.</li>
+                        <li style="margin-bottom: 8px;"><strong>B1 - Chọn cổng:</strong> Nhìn vào danh sách, tìm cổng
+                            đang hiển thị ONLINE (Xanh lá) và copy số điện thoại.</li>
+                        <li style="margin-bottom: 8px;"><strong>B2 - Gửi SMS:</strong> Bấm <em>Gửi SMS</em>, điền SĐT
+                            tổng đài và cú pháp dịch vụ rồi bấm Gửi.</li>
+                        <li style="margin-bottom: 8px;"><strong>B3 - Chờ OTP:</strong> Cổng tự động chuyển sang WAITING
+                            (Vàng). Khi tin nhắn về, mã OTP sẽ tự hiện và nhấp nháy màu Xanh dương.</li>
+                        <li style="margin-bottom: 8px;"><strong>B4 - Lưu trữ:</strong> Sử dụng mã OTP xong, bấm nút
+                            <em>Lưu lịch sử & Ẩn</em> để cất mã đi và giải phóng không gian màn hình.
+                        </li>
+                        <li style="margin-bottom: 8px;"><strong>B5 - Tra cứu:</strong> Sang tab <em>Lịch sử OTP</em> để
+                            xem lại toàn bộ các mã đã lưu hoặc xuất ra file Excel.</li>
                     </ul>
 
                     <h3 style="color: var(--text-main); margin-top: 24px;">8. Câu hỏi thường gặp (FAQ)</h3>
                     <div style="color: var(--text-muted);">
-                        <p style="margin-bottom: 8px;"><strong>Hỏi: Vì sao có OTP ở ngoài màn hình nhưng không vào lịch sử?</strong><br>
-                        <em>Đáp:</em> Hệ thống thiết kế để bạn chủ động chọn lọc. Mã chỉ được lưu vào Lịch sử khi bạn bấm nút "Lưu lịch sử" trên cổng đó. Nếu bạn xem xong rồi bỏ qua, mã sẽ không bị lưu đè.</p>
-                        
+                        <p style="margin-bottom: 8px;"><strong>Hỏi: Vì sao có OTP ở ngoài màn hình nhưng không vào lịch
+                                sử?</strong><br>
+                            <em>Đáp:</em> Hệ thống thiết kế để bạn chủ động chọn lọc. Mã chỉ được lưu vào Lịch sử khi
+                            bạn bấm nút "Lưu lịch sử" trên cổng đó. Nếu bạn xem xong rồi bỏ qua, mã sẽ không bị lưu đè.
+                        </p>
+
                         <p style="margin-bottom: 8px;"><strong>Hỏi: Vì sao vào tab Lịch sử không hiện gì?</strong><br>
-                        <em>Đáp:</em> Thường do bạn chưa từng thực hiện thao tác "Lưu lịch sử" ở tab bên ngoài, hoặc có thể do bạn vừa xóa sạch dữ liệu. Chú ý làm bước B4 ở quy trình 30 giây nhé.</p>
-                        
-                        <p style="margin-bottom: 8px;"><strong>Hỏi: Khi nào nên bấm Hủy (Release) số Firefox API?</strong><br>
-                        <em>Đáp:</em> Bạn NÊN hủy số ngay nếu: (1) Số đó báo đã đăng ký/bị khóa trên ứng dụng bạn đang dùng. (2) Bạn đã chờ quá 3-5 phút mà không thấy mã gửi về. Hủy số kịp thời sẽ giúp bạn không bị hệ thống thuê số trừ tiền oan.</p>
+                            <em>Đáp:</em> Thường do bạn chưa từng thực hiện thao tác "Lưu lịch sử" ở tab bên ngoài, hoặc
+                            có thể do bạn vừa xóa sạch dữ liệu. Chú ý làm bước B4 ở quy trình 30 giây nhé.
+                        </p>
+
+                        <p style="margin-bottom: 8px;"><strong>Hỏi: Khi nào nên bấm Hủy (Release) số Firefox
+                                API?</strong><br>
+                            <em>Đáp:</em> Bạn NÊN hủy số ngay nếu: (1) Số đó báo đã đăng ký/bị khóa trên ứng dụng bạn
+                            đang dùng. (2) Bạn đã chờ quá 3-5 phút mà không thấy mã gửi về. Hủy số kịp thời sẽ giúp bạn
+                            không bị hệ thống thuê số trừ tiền oan.
+                        </p>
+                    </div>
+                <!-- Firefox config and stuff ... -->
+                </div>
+            </div>
+
+            <!-- DASHBOARD VIEW -->
+            <div class="content-area" id="dashboard-view" style="display: none; padding-bottom: 40px; flex-direction: column;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
+                    <h2 style="font-family: 'Outfit', sans-serif; font-size: 24px; color: white;">Tổng Quan Hệ Thống</h2>
+                    <div id="dashboard-admin-controls" style="display: none; align-items: center; gap: 12px;">
+                        <span style="font-size: 14px; color: var(--text-muted);">Xem dữ liệu của:</span>
+                        <select id="dashboard-tenant-select" style="background: rgba(255,255,255,0.05); border: 1px solid var(--border-color); color: white; padding: 8px 16px; border-radius: 6px; font-size: 14px; outline: none; cursor: pointer;" onchange="loadDashboardData(this.value)">
+                            <option value="all" style="background: #0f172a; color: white; padding: 8px;">Tất cả Khách (Tổng hợp)</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div id="dash-alerts-container" style="display: none; flex-direction: column; gap: 8px; margin-bottom: 24px;">
+                    <!-- Alerts render here -->
+                </div>
+
+                <div class="dashboard-cards-grid" style="grid-template-columns: repeat(4, 1fr); margin-bottom: 24px;">
+                    <!-- Row 1 -->
+                    <div class="dashboard-card">
+                        <div class="card-icon" style="background: rgba(16, 185, 129, 0.15); color: var(--success);"><i data-lucide="activity"></i></div>
+                        <div class="card-info">
+                            <span class="card-title">OTP Hôm Nay</span>
+                            <span class="card-value" id="dash-today-otp">0</span>
+                        </div>
+                    </div>
+                    <div class="dashboard-card">
+                        <div class="card-icon" style="background: rgba(59, 130, 246, 0.15); color: var(--primary-color);"><i data-lucide="calendar"></i></div>
+                        <div class="card-info">
+                            <span class="card-title">OTP Hôm Qua</span>
+                            <span class="card-value" id="dash-yesterday-otp">0</span>
+                        </div>
+                    </div>
+                    <div class="dashboard-card">
+                        <div class="card-icon" style="background: rgba(139, 92, 246, 0.15); color: #8b5cf6;"><i data-lucide="bar-chart-2"></i></div>
+                        <div class="card-info">
+                            <span class="card-title">OTP Tháng Này</span>
+                            <span class="card-value" id="dash-month-otp">0</span>
+                        </div>
+                    </div>
+                    <div class="dashboard-card">
+                        <div class="card-icon" style="background: rgba(245, 158, 11, 0.15); color: var(--warning);"><i data-lucide="smartphone"></i></div>
+                        <div class="card-info">
+                            <span class="card-title">Thiết bị Online</span>
+                            <span class="card-value" id="dash-online-devices">0</span>
+                        </div>
+                    </div>
+
+                    <!-- Row 2 -->
+                    <div class="dashboard-card">
+                        <div class="card-icon" style="background: rgba(16, 185, 129, 0.15); color: var(--success);"><i data-lucide="check-circle"></i></div>
+                        <div class="card-info">
+                            <span class="card-title">Tỷ lệ thành công</span>
+                            <span class="card-value" id="dash-success-rate">0%</span>
+                        </div>
+                    </div>
+                    <div class="dashboard-card">
+                        <div class="card-icon" style="background: rgba(239, 68, 68, 0.15); color: var(--danger);"><i data-lucide="x-circle"></i></div>
+                        <div class="card-info">
+                            <span class="card-title">Lỗi / Timeout</span>
+                            <span class="card-value" id="dash-fail-count">0</span>
+                        </div>
+                    </div>
+                    <div class="dashboard-card">
+                        <div class="card-icon" style="background: rgba(245, 158, 11, 0.15); color: var(--warning);"><i data-lucide="alert-triangle"></i></div>
+                        <div class="card-info">
+                            <span class="card-title">Cổng Đang Bận/Lỗi</span>
+                            <span class="card-value" id="dash-busy-ports">0</span>
+                        </div>
+                    </div>
+                    <div class="dashboard-card">
+                        <div class="card-icon" style="background: rgba(59, 130, 246, 0.15); color: var(--primary-color);"><i data-lucide="clock"></i></div>
+                        <div class="card-info">
+                            <span class="card-title">OTP Gần Nhất</span>
+                            <span class="card-value" id="dash-last-otp-time" style="font-size: 16px;">--:--</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Admin Viewing Customer Stats -->
+                <div id="dash-customer-info" style="display: none; background: rgba(59, 130, 246, 0.05); border: 1px solid rgba(59, 130, 246, 0.2); border-radius: 12px; padding: 16px; margin-bottom: 24px;">
+                    <div style="display: flex; gap: 32px; flex-wrap: wrap;">
+                        <div><span style="color:var(--text-muted); font-size:13px;">Khách hàng:</span> <strong id="dash-cust-email" style="color:white;">...</strong></div>
+                        <div><span style="color:var(--text-muted); font-size:13px;">Trạng thái:</span> <strong id="dash-cust-status">...</strong></div>
+                        <div><span style="color:var(--text-muted); font-size:13px;">Giới hạn hôm nay:</span> <strong id="dash-cust-limit">...</strong></div>
+                        <div><span style="color:var(--text-muted); font-size:13px;">Hết hạn:</span> <strong id="dash-cust-expire" style="color:white;">...</strong></div>
+                        <div><span style="color:var(--text-muted); font-size:13px;">Gói cước:</span> <strong id="dash-cust-price" style="color:white;">...</strong></div>
+                    </div>
+                </div>
+
+                <!-- Charts Section -->
+                <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 24px; margin-bottom: 24px;">
+                    <div class="dashboard-chart-container">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                            <h3 style="font-size: 16px; color: white;">Xu hướng theo thời gian</h3>
+                            <select id="chart-time-range" onchange="renderDashboardCharts()" style="background: rgba(255,255,255,0.05); border: 1px solid var(--border-color); color: white; padding: 4px 8px; border-radius: 4px; font-size: 13px; outline: none; cursor: pointer;">
+                                <option value="today" style="color:black;">Hôm nay (24h)</option>
+                                <option value="7days" selected style="color:black;">7 Ngày gần nhất</option>
+                                <option value="30days" style="color:black;">30 Ngày gần nhất</option>
+                            </select>
+                        </div>
+                        <div style="height: 250px; width: 100%;">
+                            <canvas id="otpTrendChart"></canvas>
+                        </div>
+                    </div>
+                    <div class="dashboard-chart-container">
+                        <h3 style="font-size: 16px; margin-bottom: 16px; color: white;">Tỷ lệ thành công</h3>
+                        <div style="height: 250px; width: 100%; position: relative;">
+                            <canvas id="otpPieChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- History Table -->
+                <div class="grid-container" style="margin-bottom: 24px; max-height: 400px; display: flex; flex-direction: column;">
+                    <div style="padding: 16px; border-bottom: 1px solid var(--border-color); font-weight: 600; font-size: 16px; display: flex; justify-content: space-between; align-items: center;">
+                        <span>Giao dịch gần nhất (50 GD)</span>
+                        <button class="btn btn-secondary" onclick="exportDashboardHistoryToExcel()" style="font-size: 12px; padding: 6px 12px; display: flex; align-items: center; gap: 8px;">
+                            <i data-lucide="download" style="width: 14px; height: 14px;"></i> Xuất Excel
+                        </button>
+                    </div>
+                    <div class="grid-header" id="dash-history-header" style="display: grid; grid-template-columns: 140px 140px 120px 1fr 140px 100px;">
+                        <div>Thời gian</div>
+                        <div>Số điện thoại</div>
+                        <div>OTP</div>
+                        <div>Thiết bị / Nguồn</div>
+                        <div>Trạng thái</div>
+                        <div>Ghi chú</div>
+                    </div>
+                    <div class="grid-body" id="dash-history-list" style="padding: 0; overflow-y: auto;">
+                        <!-- Rendered by JS -->
+                    </div>
+                </div>
+
+                <!-- Admin Only Stats (Hidden by default) -->
+                <div id="admin-dashboard-panels" style="display: none; margin-top: 24px;">
+                    <h3 style="font-size: 18px; margin-bottom: 16px; color: white;">Tổng Quan Khách Hàng (Admin)</h3>
+                    <div class="dashboard-cards-grid" style="grid-template-columns: repeat(4, 1fr); margin-bottom: 24px;">
+                        <div class="dashboard-card" style="background: rgba(59, 130, 246, 0.05);">
+                            <div class="card-info" style="margin-left: 0;">
+                                <span class="card-title">Tổng Khách Hàng</span>
+                                <span class="card-value" id="dash-admin-total-users" style="color: var(--primary-color);">0</span>
+                            </div>
+                        </div>
+                        <div class="dashboard-card" style="background: rgba(16, 185, 129, 0.05);">
+                            <div class="card-info" style="margin-left: 0;">
+                                <span class="card-title">Đang Hoạt Động</span>
+                                <span class="card-value" id="dash-admin-active" style="color: var(--success);">0</span>
+                            </div>
+                        </div>
+                        <div class="dashboard-card" style="background: rgba(245, 158, 11, 0.05);">
+                            <div class="card-info" style="margin-left: 0;">
+                                <span class="card-title">Vượt Limit / Khóa</span>
+                                <span class="card-value" id="dash-admin-locked" style="color: var(--warning);">0</span>
+                            </div>
+                        </div>
+                        <div class="dashboard-card" style="background: rgba(239, 68, 68, 0.05);">
+                            <div class="card-info" style="margin-left: 0;">
+                                <span class="card-title">Đã Hết Hạn</span>
+                                <span class="card-value" id="dash-admin-expired" style="color: var(--danger);">0</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                        <!-- Top 10 Users -->
+                        <div class="table-container" style="margin: 0; background: rgba(255,255,255,0.02);">
+                            <div style="padding: 16px; border-bottom: 1px solid var(--border-color); font-weight: 600; color: white; display: flex; justify-content: space-between;">
+                                <span><i data-lucide="bar-chart-2"></i> Top Khách Dùng Nhiều Nhất (Hôm nay)</span>
+                            </div>
+                            <div class="grid-header" style="display: grid; grid-template-columns: 1fr 80px 80px; background: rgba(0,0,0,0.2);">
+                                <div>Khách hàng</div>
+                                <div>Hôm nay</div>
+                                <div>Tổng</div>
+                            </div>
+                            <div id="dash-admin-top-users" class="grid-body" style="max-height: 300px;">
+                                <!-- Renders by JS -->
+                            </div>
+                        </div>
+
+                        <!-- Revenue and Alerts -->
+                        <div style="display: flex; flex-direction: column; gap: 20px;">
+                            <div class="dashboard-card" style="margin: 0; background: rgba(16, 185, 129, 0.05); border: 1px solid rgba(16, 185, 129, 0.2);">
+                                <div class="card-icon" style="background: rgba(16, 185, 129, 0.15); color: var(--success);">
+                                    <i data-lucide="dollar-sign"></i>
+                                </div>
+                                <div class="card-info">
+                                    <span class="card-title">Doanh Thu Dự Kiến (Tháng này)</span>
+                                    <span class="card-value" id="dash-admin-revenue" style="color: var(--success);">0 ₫</span>
+                                    <span style="font-size: 12px; color: var(--text-muted); margin-top: 4px;">Tổng cộng từ cột Giá thuê</span>
+                                </div>
+                            </div>
+                            
+                            <div class="table-container" style="margin: 0; background: rgba(255,255,255,0.02); flex: 1;">
+                                <div style="padding: 16px; border-bottom: 1px solid var(--border-color); font-weight: 600; color: var(--warning); display: flex; justify-content: space-between;">
+                                    <span><i data-lucide="alert-triangle"></i> Cảnh báo Hết hạn / Limit</span>
+                                </div>
+                                <div id="dash-admin-alerts" class="grid-body" style="max-height: 200px;">
+                                    <!-- Renders by JS -->
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ADMIN VIEW -->
+            <div class="content-area" id="admin-view" style="display: none;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
+                    <h2 style="font-family: 'Outfit', sans-serif; font-size: 20px;">Quản lý Khách hàng</h2>
+                    <div style="display: flex; gap: 12px; align-items: center;">
+                        <input type="text" id="admin-search-user" placeholder="Tìm Email hoặc Customer ID..." style="background: rgba(255,255,255,0.05); border: 1px solid var(--border-color); color: white; padding: 8px 12px; border-radius: 6px; outline: none; width: 250px;" oninput="filterAdminUsers()">
+                        <select id="admin-filter-status" style="background: rgba(255,255,255,0.05); border: 1px solid var(--border-color); color: white; padding: 8px 12px; border-radius: 6px; outline: none;" onchange="filterAdminUsers()">
+                            <option value="all" style="background: #0f172a; color: white;">Tất cả trạng thái</option>
+                            <option value="active" style="background: #0f172a; color: white;">Đang hoạt động</option>
+                            <option value="locked" style="background: #0f172a; color: white;">Bị khóa</option>
+                            <option value="expired" style="background: #0f172a; color: white;">Đã hết hạn</option>
+                            <option value="near_expire" style="background: #0f172a; color: white;">Gần hết hạn (3 ngày)</option>
+                            <option value="over_limit" style="background: #0f172a; color: white;">Vượt Limit ngày</option>
+                            <option value="deleted" style="background: #0f172a; color: white;">Đã xóa mềm</option>
+                        </select>
+                        <button class="btn btn-outline" onclick="openAdminLogsModal()">
+                            <i data-lucide="activity"></i> Nhật ký
+                        </button>
+                        <button class="btn btn-primary" onclick="document.getElementById('admin-create-form').style.display='block'">
+                            <i data-lucide="user-plus"></i> Thêm Khách
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Admin Create User Form (Hidden by default) -->
+                <div id="admin-create-form"
+                    style="display: none; background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); border-radius: 8px; padding: 20px; margin-bottom: 24px;">
+                    <h3 style="margin-top: 0; margin-bottom: 16px; font-size: 15px;">Khởi tạo tài khoản</h3>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px;">
+                        <div class="form-group">
+                            <label>Email đăng nhập</label>
+                            <input type="email" id="admin-new-email" style="width: 100%;">
+                        </div>
+                        <div class="form-group">
+                            <label>Mật khẩu</label>
+                            <input type="password" id="admin-new-password" style="width: 100%;">
+                        </div>
+                        <div class="form-group">
+                            <label>Mã Khách Hàng (customerId)</label>
+                            <input type="text" id="admin-new-customerid" placeholder="Tự động nếu để trống" style="width: 100%;">
+                        </div>
+                        <div class="form-group">
+                            <label>Giới hạn OTP / Ngày (0 = Không giới hạn)</label>
+                            <input type="number" id="admin-new-dailylimit" value="0" style="width: 100%;">
+                        </div>
+                        <div class="form-group">
+                            <label>Ngày hết hạn</label>
+                            <input type="date" id="admin-new-expiredate" style="width: 100%;">
+                        </div>
+                    </div>
+                    <div style="display: flex; gap: 12px; margin-top: 8px;">
+                        <button class="btn btn-primary" onclick="adminCreateUser()">Tạo tài khoản</button>
+                        <button class="btn btn-outline"
+                            onclick="document.getElementById('admin-create-form').style.display='none'">Hủy</button>
+                    </div>
+                </div>
+
+                <div class="grid-container">
+                    <div class="grid-header">
+                        <div class="col-admin-email">Email</div>
+                        <div class="col-admin-tenant">Customer ID</div>
+                        <div class="col-admin-limits">Giới hạn & Hạn Dùng</div>
+                        <div class="col-admin-stats">Thống Kê Nhanh</div>
+                        <div class="col-admin-status">Trạng thái</div>
+                        <div class="col-admin-actions" style="width: 350px;">Hành Động</div>
+                    </div>
+                    <div class="grid-body" id="admin-users-list">
+                        <!-- User rows loaded here -->
                     </div>
                 </div>
             </div>
         </main>
+    </div>
+
+    <!-- Modal Edit User -->
+    <div class="modal-overlay" id="edit-user-modal">
+        <div class="modal" style="width: 600px;">
+            <div class="modal-header">
+                <h2>Cấu hình Khách hàng</h2>
+                <button class="close-btn" onclick="closeModal('edit-user-modal')"><i data-lucide="x"></i></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="edit-user-uid">
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px;">
+                    <div class="form-group">
+                        <label>Giới hạn OTP / Ngày (0 = KGH)</label>
+                        <input type="number" id="edit-user-dailylimit" style="width: 100%;">
+                    </div>
+                    <div class="form-group">
+                        <label style="display: flex; justify-content: space-between;">
+                            Ngày hết hạn
+                            <span style="font-size: 11px;">
+                                <a href="#" onclick="quickExtendDays(7); return false;" style="color: var(--primary-color);">+7</a> | 
+                                <a href="#" onclick="quickExtendDays(30); return false;" style="color: var(--primary-color);">+30</a> | 
+                                <a href="#" onclick="quickExtendDays(90); return false;" style="color: var(--primary-color);">+90</a>
+                            </span>
+                        </label>
+                        <input type="date" id="edit-user-expiredate" style="width: 100%;">
+                    </div>
+                </div>
+                <div class="form-group" style="margin-bottom: 16px;">
+                    <label>Giá thuê / Gói cước (Ghi chú)</label>
+                    <input type="text" id="edit-user-price" style="width: 100%;">
+                </div>
+                <div class="form-group" style="margin-bottom: 16px;">
+                    <label>Nguồn khách hàng</label>
+                    <input type="text" id="edit-user-source" style="width: 100%;">
+                </div>
+                <div class="form-group" style="margin-bottom: 16px;">
+                    <label>Tags (Cách nhau bằng dấu phẩy. VD: vip, reseller, nợ tiền)</label>
+                    <input type="text" id="edit-user-tags" style="width: 100%;">
+                </div>
+                <div class="form-group" style="margin-bottom: 16px;">
+                    <label>Ghi chú chung</label>
+                    <textarea id="edit-user-notes" style="width: 100%; height: 60px; background: rgba(255,255,255,0.05); border: 1px solid var(--border-color); border-radius: 6px; color: white; padding: 8px; resize: vertical;"></textarea>
+                </div>
+                <div class="form-group" style="margin-bottom: 24px;">
+                    <label>Vấn đề đang gặp (Nếu có)</label>
+                    <textarea id="edit-user-issues" style="width: 100%; height: 60px; background: rgba(255,255,255,0.05); border: 1px solid var(--border-color); border-radius: 6px; color: white; padding: 8px; resize: vertical;"></textarea>
+                </div>
+                <button class="btn btn-primary" onclick="adminSaveUserConfig()" style="width: 100%;">Lưu Cấu Hình</button>
+            </div>
+        </div>
+    </div>
+
+    </div>
+
+    <!-- Modal Admin Logs -->
+    <div class="modal-overlay" id="admin-logs-modal">
+        <div class="modal" style="width: 700px; max-width: 95vw;">
+            <div class="modal-header">
+                <h2><i data-lucide="activity" style="width: 18px; height: 18px; vertical-align: middle; margin-right: 8px;"></i> Nhật ký Quản trị</h2>
+                <button class="close-btn" onclick="closeModal('admin-logs-modal')"><i data-lucide="x"></i></button>
+            </div>
+            <div class="modal-body" style="padding: 0;">
+                <div class="grid-header" style="grid-template-columns: 140px 180px 140px 1fr; background: rgba(0,0,0,0.2); margin: 0; border-radius: 0;">
+                    <div>Thời gian</div>
+                    <div>Thực hiện bởi</div>
+                    <div>Thao tác</div>
+                    <div>Mục tiêu</div>
+                </div>
+                <div class="grid-body" id="admin-logs-list" style="max-height: 400px; padding: 0;">
+                    <!-- Renders by JS -->
+                </div>
+            </div>
+        </div>
     </div>
 
     <!-- Modal Send SMS -->
@@ -452,6 +1209,53 @@
     </div>
 
     <!-- Settings Modal -->
+    <div class="modal-overlay" id="transaction-details-modal">
+        <div class="modal" style="width: 500px; max-width: 95vw;">
+            <div class="modal-header">
+                <h2>Chi tiết Giao dịch</h2>
+                <button class="close-btn" onclick="closeModal('transaction-details-modal')"><i data-lucide="x"></i></button>
+            </div>
+            <div class="modal-body" style="padding: 24px;">
+                <div style="background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); border-radius: 12px; padding: 16px; margin-bottom: 20px;">
+                    <div style="text-align: center; margin-bottom: 16px;">
+                        <div style="color: var(--text-muted); font-size: 13px; margin-bottom: 4px;">MÃ OTP</div>
+                        <div id="td-otp" style="font-size: 32px; font-weight: 700; color: var(--success); letter-spacing: 2px;">---</div>
+                        <button class="btn btn-secondary" style="margin-top: 8px; font-size: 12px; padding: 4px 12px;" onclick="fastCopy('td-otp')"><i data-lucide="copy" style="width: 14px; height: 14px;"></i> Copy OTP</button>
+                    </div>
+                </div>
+
+                <div class="grid-container" style="display: grid; grid-template-columns: 120px 1fr; gap: 16px; font-size: 14px; border: none; background: transparent;">
+                    <div style="color: var(--text-muted);">Khách hàng</div>
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <strong id="td-email" style="color: white;">---</strong>
+                        <button class="btn" style="background: transparent; border: none; color: var(--primary-color); padding: 0;" onclick="fastCopy('td-email')"><i data-lucide="copy" style="width: 16px; height: 16px;"></i></button>
+                    </div>
+
+                    <div style="color: var(--text-muted);">Số điện thoại</div>
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <strong id="td-phone" style="color: white; font-family: monospace; font-size: 15px;">---</strong>
+                        <button class="btn" style="background: transparent; border: none; color: var(--primary-color); padding: 0;" onclick="fastCopy('td-phone')"><i data-lucide="copy" style="width: 16px; height: 16px;"></i></button>
+                    </div>
+
+                    <div style="color: var(--text-muted);">Nguồn</div>
+                    <div><span id="td-source" style="padding: 4px 8px; border-radius: 6px; font-size: 12px; font-weight: 600;">---</span></div>
+
+                    <div style="color: var(--text-muted);">Thiết bị / Cổng</div>
+                    <div><strong id="td-device" style="font-family: monospace; color: white;">---</strong></div>
+
+                    <div style="color: var(--text-muted);">TG Nhận Lệnh</div>
+                    <div id="td-time-created" style="color: white;">---</div>
+
+                    <div style="color: var(--text-muted);">TG Có OTP</div>
+                    <div id="td-time-received" style="color: white;">---</div>
+
+                    <div style="color: var(--text-muted);">Ghi chú Lỗi</div>
+                    <div id="td-error" style="color: var(--danger);">---</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <div class="modal-overlay" id="settings-modal">
         <div class="modal" style="width: 400px; max-width: 95vw;">
             <div class="modal-header">
@@ -470,6 +1274,32 @@
             </div>
             <div class="modal-footer">
                 <button class="btn btn-primary" onclick="closeModal('settings-modal')">Đóng</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Admin Logs Modal -->
+    <div class="modal-overlay" id="admin-logs-modal">
+        <div class="modal" style="width: 800px; max-width: 95vw; max-height: 90vh; display: flex; flex-direction: column;">
+            <div class="modal-header">
+                <h2><i data-lucide="activity"></i> Nhật Ký Quản Trị (Audit Logs)</h2>
+                <button class="close-btn" onclick="closeModal('admin-logs-modal')"><i data-lucide="x"></i></button>
+            </div>
+            <div class="modal-body" style="flex: 1; overflow-y: auto; padding: 0;">
+                <div class="table-container" style="margin: 0; border: none; border-radius: 0;">
+                    <div class="grid-header" style="grid-template-columns: 150px 200px 200px 1fr;">
+                        <div>Thời gian</div>
+                        <div>Người thực hiện</div>
+                        <div>Hành động</div>
+                        <div>Đối tượng</div>
+                    </div>
+                    <div id="admin-logs-list" class="grid-body" style="min-height: 300px;">
+                        <div style="padding: 20px; text-align: center; color: var(--text-muted);">Đang tải nhật ký...</div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-primary" onclick="closeModal('admin-logs-modal')">Đóng</button>
             </div>
         </div>
     </div>
@@ -515,6 +1345,7 @@
 
     <!-- Firebase JS SDK (v8 compat cho web thuần không dùng webpack) -->
     <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
     <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
 
     <script src="app.js?v=2"></script>

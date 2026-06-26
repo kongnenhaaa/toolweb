@@ -575,6 +575,12 @@ h1 {
 .col-otp { flex: 1; font-family: 'Outfit', sans-serif; font-size: 18px; color: var(--warning); font-weight: 700; }
 .col-actions { width: 300px; display: flex; gap: 8px; justify-content: flex-end; }
 .col-time { width: 150px; color: var(--text-muted); font-size: 14px; }
+.col-admin-email { flex: 2; font-weight: 500; overflow: hidden; text-overflow: ellipsis; }
+.col-admin-tenant { flex: 1; font-family: 'Outfit', sans-serif; font-size: 15px; color: var(--primary-color); font-weight: 600; }
+.col-admin-limits { flex: 1; font-size: 13px; color: var(--text-muted); }
+.col-admin-stats { flex: 1; font-size: 13px; color: var(--text-muted); }
+.col-admin-status { width: 120px; }
+.col-admin-actions { width: 350px; display: flex; gap: 8px; justify-content: flex-end; }
 .port-health {
     color: var(--text-muted);
     font-size: 11px;
@@ -1244,4 +1250,69 @@ input:checked + .slider:before {
 
 .slider.round:before {
     border-radius: 50%;
+}
+
+/* DASHBOARD STYLES */
+.dashboard-cards-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 20px;
+    margin-bottom: 30px;
+}
+
+.dashboard-card {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 24px;
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    transition: all 0.2s ease;
+}
+
+.dashboard-card:hover {
+    background: rgba(255, 255, 255, 0.05);
+    transform: translateY(-2px);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+}
+
+.dashboard-card .card-icon {
+    width: 64px;
+    height: 64px;
+    border-radius: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.dashboard-card .card-icon i {
+    width: 32px;
+    height: 32px;
+}
+
+.dashboard-card .card-info {
+    display: flex;
+    flex-direction: column;
+}
+
+.dashboard-card .card-title {
+    font-size: 14px;
+    color: var(--text-muted);
+    font-weight: 500;
+    margin-bottom: 4px;
+}
+
+.dashboard-card .card-value {
+    font-family: 'Outfit', sans-serif;
+    font-size: 32px;
+    font-weight: 700;
+    color: white;
+}
+
+.dashboard-chart-container {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 24px;
 }
