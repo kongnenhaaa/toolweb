@@ -223,6 +223,9 @@
                         <span id="firefox-integral"
                             style="padding: 8px 16px; background: rgba(155, 89, 182, 0.1); color: #9b59b6; border-radius: 6px; font-weight: 600; border: 1px solid rgba(155, 89, 182, 0.2);">Điểm:
                             0</span>
+                        <button class="btn btn-outline" onclick="firefoxCheckBalance()" style="background: rgba(255,255,255,0.05); color: var(--text-main); border: 1px solid var(--border-color);">
+                            <i data-lucide="refresh-cw"></i> Cập nhật số dư
+                        </button>
                         <button class="btn btn-primary" onclick="firefoxGetPhone()">
                             <i data-lucide="plus-circle"></i> Thuê Số Mới
                         </button>
@@ -231,7 +234,7 @@
 
                 <!-- Config Panel -->
                 <div
-                    style="background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); border-radius: 8px; padding: 16px; margin-bottom: 20px;">
+                    style="background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); border-radius: 8px; padding: 16px; margin-bottom: 20px; display: none;">
                     <h3
                         style="margin-top: 0; margin-bottom: 12px; font-size: 14px; font-weight: 600; color: var(--text-main); display: flex; align-items: center; gap: 6px;">
                         <i data-lucide="settings" style="width: 16px; height: 16px;"></i> Cấu hình API

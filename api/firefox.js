@@ -17,7 +17,12 @@ export default async function handler(req, res) {
     try {
         // Trích xuất toàn bộ query string (ví dụ: act=getItem&key=)
         const urlParams = new URLSearchParams(req.query);
-        const targetUrl = `http://www.firefox.fun/yhapi.ashx?${urlParams.toString()}`;
+        
+        // Dùng biến môi trường thay vì hardcode
+        urlParams.set('token', process.env.FIREFOX_TOKEN || '');
+        
+        // Đổi sang HTTPS để mã hoá đường truyền
+        const targetUrl = `https://www.firefox.fun/yhapi.ashx?${urlParams.toString()}`;
 
         // Fetch dữ liệu từ API gốc
         const response = await fetch(targetUrl);

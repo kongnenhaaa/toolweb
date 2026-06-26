@@ -1904,22 +1904,7 @@ if (navFirefoxBtn) {
 // Init
 window.onload = () => {
     loadFirefoxConfig();
-    
-    // Firefox Config Sync
-    db.ref('firefox_config').on('value', (snapshot) => {
-        const config = snapshot.val();
-        if (config) {
-            localStorage.setItem(FF_CONFIG_KEY, JSON.stringify(config));
-            const baseUrlEl = document.getElementById('ff-base-url');
-            if (baseUrlEl) baseUrlEl.value = config.baseUrl || '/api/firefox';
-            const tokenEl = document.getElementById('ff-token');
-            if (tokenEl) tokenEl.value = config.token || '';
-            const srvIdEl = document.getElementById('ff-service-id');
-            if (srvIdEl) srvIdEl.value = config.serviceId || '';
-            const countryEl = document.getElementById('ff-country');
-            if (countryEl) countryEl.value = config.country || 'vn';
-        }
-    });
+
 
     // Global Note Sync
     const noteEl = document.getElementById('global-note');
@@ -2158,19 +2143,23 @@ function saveFirefoxPorts() {
 
 window.firefoxSaveConfig = function () {
     const config = {
-        baseUrl: document.getElementById('ff-base-url').value.trim(),
-        token: document.getElementById('ff-token').value.trim(),
-        serviceId: document.getElementById('ff-service-id').value.trim(),
-        country: document.getElementById('ff-country').value.trim()
+        baseUrl: document.getElementById('ff-base-url') ? document.getElementById('ff-base-url').value.trim() : '/api/firefox',
+        token: 'HIDDEN',
+        serviceId: document.getElementById('ff-service-id') ? document.getElementById('ff-service-id').value.trim() : '1049',
+        country: document.getElementById('ff-country') ? document.getElementById('ff-country').value.trim() : 'vnm'
     };
     localStorage.setItem(FF_CONFIG_KEY, JSON.stringify(config));
-    db.ref('firefox_config').set(config);
     showToast('Đã lưu cấu hình Firefox API');
     return config;
 }
 
 function getFirefoxConfig() {
-    return JSON.parse(localStorage.getItem(FF_CONFIG_KEY) || '{}');
+    return {
+        baseUrl: '/api/firefox',
+        token: 'HIDDEN',
+        serviceId: '1049',
+        country: 'vnm'
+    };
 }
 
 async function callFirefoxApi(params) {
