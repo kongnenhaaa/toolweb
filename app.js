@@ -2072,15 +2072,11 @@ if (navContactBtn) {
         const guideView = document.getElementById('guide-view');
         if (guideView) guideView.style.display = 'none';
         const contactView = document.getElementById('contact-view');
-        if (contactView) contactView.style.display = 'none';
+        if (contactView) contactView.style.display = 'block';
         const adminView = document.getElementById('admin-view');
         if (adminView) adminView.style.display = 'none';
         const dashboardView = document.getElementById('dashboard-view');
         if (dashboardView) dashboardView.style.display = 'none';
-        
-        const contactView = document.getElementById('contact-view');
-        if (contactView) contactView.style.display = 'block';
-
         const topBarControls = document.getElementById('top-bar-controls');
         if (topBarControls) topBarControls.style.display = 'none';
     });
@@ -2098,8 +2094,6 @@ if (navDashboardBtn) {
         if (firefoxView) firefoxView.style.display = 'none';
         const guideView = document.getElementById('guide-view');
         if (guideView) guideView.style.display = 'none';
-        const contactView = document.getElementById('contact-view');
-        if (contactView) contactView.style.display = 'none';
         const contactView = document.getElementById('contact-view');
         if (contactView) contactView.style.display = 'none';
         const adminView = document.getElementById('admin-view');
