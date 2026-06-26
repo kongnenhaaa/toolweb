@@ -1880,7 +1880,7 @@ function showToast(message, type = 'success') {
 
 // Navigation Helper
 function setActiveNav(activeId) {
-    const navs = ['nav-active', 'nav-history', 'nav-firefox', 'nav-guide', 'nav-admin', 'nav-dashboard'];
+    const navs = ['nav-active', 'nav-history', 'nav-firefox', 'nav-guide', 'nav-contact', 'nav-admin', 'nav-dashboard'];
     navs.forEach(id => {
         const el = document.getElementById(id);
         if (el) {
@@ -2047,6 +2047,31 @@ if (navAdminBtn) {
     });
 }
 
+const navContactBtn = document.getElementById('nav-contact');
+if (navContactBtn) {
+    navContactBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        setActiveNav('nav-contact');
+
+        document.getElementById('active-view').style.display = 'none';
+        document.getElementById('history-view').style.display = 'none';
+        const firefoxView = document.getElementById('firefox-view');
+        if (firefoxView) firefoxView.style.display = 'none';
+        const guideView = document.getElementById('guide-view');
+        if (guideView) guideView.style.display = 'none';
+        const adminView = document.getElementById('admin-view');
+        if (adminView) adminView.style.display = 'none';
+        const dashboardView = document.getElementById('dashboard-view');
+        if (dashboardView) dashboardView.style.display = 'none';
+        
+        const contactView = document.getElementById('contact-view');
+        if (contactView) contactView.style.display = 'block';
+
+        const topBarControls = document.getElementById('top-bar-controls');
+        if (topBarControls) topBarControls.style.display = 'none';
+    });
+}
+
 const navDashboardBtn = document.getElementById('nav-dashboard');
 if (navDashboardBtn) {
     navDashboardBtn.addEventListener('click', (e) => {
@@ -2059,6 +2084,8 @@ if (navDashboardBtn) {
         if (firefoxView) firefoxView.style.display = 'none';
         const guideView = document.getElementById('guide-view');
         if (guideView) guideView.style.display = 'none';
+        const contactView = document.getElementById('contact-view');
+        if (contactView) contactView.style.display = 'none';
         const adminView = document.getElementById('admin-view');
         if (adminView) adminView.style.display = 'none';
         
@@ -4293,7 +4320,7 @@ function showTransactionDetails(item, receivedTimeStr, createdTimeStr, srcBg, sr
     document.getElementById('td-time-received').textContent = receivedTimeStr;
     document.getElementById('td-error').textContent = item.errorMsg || 'Không có lỗi';
     
-    showModal('transaction-details-modal');
+    document.getElementById('transaction-details-modal').classList.add('active');
 }
 
 window.fastCopy = function(elementId) {
@@ -4307,6 +4334,116 @@ window.fastCopy = function(elementId) {
     }
 }
 
+window.showDashStatDetails = function(type) {
+    const list = document.getElementById('dash-stat-modal-list');
+    const header = document.getElementById('dash-stat-modal-header');
+    const title = document.getElementById('dash-stat-modal-title');
+    
+    list.innerHTML = '';
+    
+    if (type === 'today' || type === 'yesterday' || type === 'month') {
+        if (!window.currentDashboardHistory) return;
+        
+        const now = new Date();
+        const dToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        const dYesterday = new Date(dToday.getTime() - 86400000);
+        const dMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+        
+        const sorted = [...window.currentDashboardHistory].sort((a,b) => (Number(b.timestamp||0) - Number(a.timestamp||0)));
+        const displayData = sorted.filter(item => {
+            const ts = Number(item.timestamp || 0);
+            if (ts <= 0) return false;
+            if (type === 'today') return ts >= dToday.getTime();
+            if (type === 'yesterday') return ts >= dYesterday.getTime() && ts < dToday.getTime();
+            if (type === 'month') return ts >= dMonthStart.getTime();
+        });
+        
+        const titleStr = type === 'today' ? 'OTP Hôm Nay' : (type === 'yesterday' ? 'OTP Hôm Qua' : 'OTP Tháng Này');
+        title.textContent = `${titleStr} (${displayData.length})`;
+        
+        header.style.gridTemplateColumns = '140px 120px 100px 140px 140px 1fr';
+        header.innerHTML = `<div>Thời gian</div><div>Số điện thoại</div><div>OTP</div><div>Nguồn</div><div>Thiết bị / Port</div><div>Trạng thái</div>`;
+        
+        if (displayData.length === 0) {
+            list.innerHTML = '<div style="padding: 24px; text-align: center; color: var(--text-muted);">Không có dữ liệu</div>';
+        } else {
+            displayData.forEach(item => {
+                let tsStr = item.usedTime || '';
+                let createTsStr = 'Không xác định';
+                if (item.timestamp) {
+                    const d = new Date(Number(item.timestamp));
+                    tsStr = `${d.getHours().toString().padStart(2,'0')}:${d.getMinutes().toString().padStart(2,'0')}:${d.getSeconds().toString().padStart(2,'0')} ${d.toLocaleDateString('vi-VN')}`;
+                    if (item.createdAt) {
+                        const dc = new Date(Number(item.createdAt));
+                        createTsStr = `${dc.getHours().toString().padStart(2,'0')}:${dc.getMinutes().toString().padStart(2,'0')}:${dc.getSeconds().toString().padStart(2,'0')} ${dc.toLocaleDateString('vi-VN')}`;
+                    } else {
+                        createTsStr = tsStr;
+                    }
+                }
+                
+                let statusHtml = item.errorMsg ? `<span style="color:var(--danger);font-size:11px;">Lỗi: ${escapeHtml(item.errorMsg)}</span>` : `<span style="color:var(--success);font-weight:600;">${escapeHtml(item.otp || '')}</span>`;
+                
+                const sourceLower = (item.source || '').toLowerCase();
+                let srcBg = 'rgba(255,255,255,0.1)';
+                let srcColor = 'white';
+                if (sourceLower.includes('firefox')) { srcBg = 'rgba(245, 158, 11, 0.15)'; srcColor = 'var(--warning)'; }
+                else if (sourceLower.includes('gsm')) { srcBg = 'rgba(59, 130, 246, 0.15)'; srcColor = 'var(--primary-color)'; }
+                else if (sourceLower.includes('manual')) { srcBg = 'rgba(139, 92, 246, 0.15)'; srcColor = '#8b5cf6'; }
+                let srcHtml = `<span style="background: ${srcBg}; color: ${srcColor}; padding: 2px 6px; border-radius: 4px; font-size: 11px;">${escapeHtml(item.source || 'UNK')}</span>`;
+                
+                const row = document.createElement('div');
+                row.className = 'grid-row';
+                row.style.display = 'grid';
+                row.style.gridTemplateColumns = header.style.gridTemplateColumns;
+                row.style.fontSize = '12px';
+                row.style.cursor = 'pointer';
+                row.onclick = () => showTransactionDetails(item, tsStr, createTsStr, srcBg, srcColor);
+                
+                row.innerHTML = `
+                    <div style="color:var(--text-muted);">${tsStr}</div>
+                    <div>${escapeHtml(item.phone || '')}</div>
+                    <div>${statusHtml}</div>
+                    <div>${srcHtml}</div>
+                    <div style="color:var(--text-muted); font-family:monospace;">${escapeHtml(item.id || '')}</div>
+                    <div style="color:var(--warning);">${item.errorMsg ? escapeHtml(item.errorMsg) : 'Thành công'}</div>
+                `;
+                list.appendChild(row);
+            });
+        }
+    } else if (type === 'devices') {
+        const serverNow = Date.now() + serverTimeOffset;
+        const aliveMachines = [];
+        Object.keys(lastSyncByMachine).forEach(mId => {
+            if (serverNow - lastSyncByMachine[mId] <= 15000) aliveMachines.push(mId);
+        });
+        
+        title.textContent = `Thiết bị đang Online (${aliveMachines.length})`;
+        header.style.gridTemplateColumns = '200px 1fr';
+        header.innerHTML = `<div>Mã Thiết bị (Machine ID)</div><div>Trạng thái</div>`;
+        
+        if (aliveMachines.length === 0) {
+            list.innerHTML = '<div style="padding: 24px; text-align: center; color: var(--text-muted);">Không có thiết bị online</div>';
+        } else {
+            aliveMachines.forEach(mId => {
+                const row = document.createElement('div');
+                row.className = 'grid-row';
+                row.style.display = 'grid';
+                row.style.gridTemplateColumns = header.style.gridTemplateColumns;
+                row.style.fontSize = '13px';
+                
+                row.innerHTML = `
+                    <div style="font-weight: 600; color: var(--primary-color);">${escapeHtml(mId)}</div>
+                    <div><span style="color:var(--success); font-weight:600;"><i data-lucide="check-circle" style="width:14px;height:14px;vertical-align:middle;margin-right:4px;"></i> Đang kết nối</span></div>
+                `;
+                list.appendChild(row);
+            });
+            if (window.lucide) lucide.createIcons();
+        }
+    }
+    
+    document.getElementById('dash-stat-details-modal').classList.add('active');
+}
+
 window.isDashboardHistoryExpanded = false;
 window.toggleDashboardHistoryLimit = function() {
     window.isDashboardHistoryExpanded = !window.isDashboardHistoryExpanded;
@@ -4316,7 +4453,7 @@ window.toggleDashboardHistoryLimit = function() {
 }
 
 window.showExportOptionsModal = function() {
-    showModal('export-options-modal');
+    document.getElementById('export-options-modal').classList.add('active');
 }
 
 window.exportDashboardHistoryToExcel = function() {
