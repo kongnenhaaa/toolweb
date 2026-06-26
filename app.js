@@ -4141,69 +4141,100 @@ window.renderDashboardCharts = function() {
     const counts = [];
     const now = new Date();
     
+    const points = [];
+    
     if (range === 'today') {
-        // 24 hours of current calendar day
         const dTodayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-        const hourlyCounts = new Array(24).fill(0);
-        historyData.forEach(item => {
-            let ts = Number(item.timestamp || 0);
-            if (ts >= dTodayStart && ts <= now.getTime()) {
-                hourlyCounts[new Date(ts).getHours()]++;
-            }
-        });
-        for (let i=0; i<24; i++) { labels.push(i+'h'); counts.push(hourlyCounts[i]); }
+        points.push({ x: dTodayStart, y: 0, isDummy: true });
+        points.push({ x: now.getTime(), y: 0, isDummy: true });
     } else {
-        // 7 or 30 days based on calendar dates
         const days = range === '7days' ? 7 : 30;
         const dToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        const startOfRange = new Date(dToday);
+        startOfRange.setDate(startOfRange.getDate() - days + 1);
         
         for (let i = days - 1; i >= 0; i--) {
             const d = new Date(dToday);
             d.setDate(d.getDate() - i);
-            labels.push(d.toLocaleDateString('vi-VN', {day:'2-digit', month:'2-digit'}));
-            counts.push(0);
+            points.push({ x: d.getTime(), y: 0, isDummy: true });
         }
-        
-        const startOfRange = new Date(dToday);
-        startOfRange.setDate(startOfRange.getDate() - days + 1);
-        
-        historyData.forEach(item => {
-            let ts = Number(item.timestamp || 0);
-            if (ts >= startOfRange.getTime()) {
-                const itemDate = new Date(ts);
-                const itemDayStart = new Date(itemDate.getFullYear(), itemDate.getMonth(), itemDate.getDate());
-                const diffDays = Math.round((dToday.getTime() - itemDayStart.getTime()) / (1000*60*60*24));
-                if (diffDays >= 0 && diffDays < days) {
-                    counts[days - 1 - diffDays]++;
-                }
-            }
-        });
+        points.push({ x: now.getTime(), y: 0, isDummy: true });
     }
+
+    const startOfRangeMs = points[0].x;
+    const filteredHistory = historyData.filter(item => {
+        let ts = Number(item.timestamp || 0);
+        return ts >= startOfRangeMs && ts <= now.getTime();
+    }).sort((a,b) => Number(a.timestamp) - Number(b.timestamp));
+
+    let cumulative = 0;
+    filteredHistory.forEach(item => {
+        cumulative++;
+        points.push({ x: Number(item.timestamp), y: cumulative, isDummy: false, item: item });
+    });
+
+    points.sort((a,b) => a.x - b.x);
+
+    let currentY = 0;
+    const chartData = [];
+    points.forEach(p => {
+        if (p.isDummy) {
+            p.y = currentY;
+        } else {
+            currentY = p.y;
+        }
+        chartData.push({ x: p.x, y: p.y });
+    });
 
     // Trend Chart
     if (dashTrendChartInstance) dashTrendChartInstance.destroy();
     dashTrendChartInstance = new Chart(document.getElementById('otpTrendChart').getContext('2d'), {
         type: 'line',
         data: {
-            labels: labels,
             datasets: [{
-                label: 'OTP/Giao dịch',
-                data: counts,
+                label: 'Tổng OTP đã nhận',
+                data: chartData,
                 borderColor: '#3b82f6',
                 backgroundColor: 'rgba(59, 130, 246, 0.1)',
                 borderWidth: 2,
                 fill: true,
-                tension: 0.3,
-                pointRadius: 2
+                tension: 0.2, // slight curve
+                pointRadius: (ctx) => {
+                    // Hide dummy points
+                    const isDummy = points[ctx.dataIndex]?.isDummy;
+                    return isDummy ? 0 : 3;
+                },
+                pointHoverRadius: 5
             }]
         },
         options: {
             responsive: true, maintainAspectRatio: false,
             scales: {
                 y: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#94a3b8' } },
-                x: { grid: { display: false }, ticks: { color: '#94a3b8' } }
+                x: { 
+                    type: 'time', 
+                    time: {
+                        unit: range === 'today' ? 'hour' : 'day',
+                        displayFormats: {
+                            hour: 'HH:mm',
+                            day: 'dd/MM'
+                        },
+                        tooltipFormat: 'HH:mm dd/MM/yyyy'
+                    },
+                    grid: { display: false }, 
+                    ticks: { color: '#94a3b8' } 
+                }
             },
-            plugins: { legend: { display: false } }
+            plugins: { 
+                legend: { display: false },
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            return `Tích luỹ: ${context.parsed.y} OTP`;
+                        }
+                    }
+                }
+            }
         }
     });
 
@@ -4492,6 +4523,7 @@ window.exportDashboardHistoryToExcel = function() {
     }
     
     const range = document.getElementById('export-time-range')?.value || 'all';
+    const sourceFilter = document.getElementById('export-source-filter')?.value || 'all';
     let filteredData = [...window.currentDashboardHistory];
     const now = Date.now();
     
@@ -4501,6 +4533,12 @@ window.exportDashboardHistoryToExcel = function() {
         filteredData = filteredData.filter(item => (now - Number(item.timestamp||0)) <= 7 * 24 * 60 * 60 * 1000);
     } else if (range === '30d') {
         filteredData = filteredData.filter(item => (now - Number(item.timestamp||0)) <= 30 * 24 * 60 * 60 * 1000);
+    }
+    
+    if (sourceFilter === 'firefox') {
+        filteredData = filteredData.filter(item => (item.source || '').toLowerCase().includes('firefox'));
+    } else if (sourceFilter === 'local') {
+        filteredData = filteredData.filter(item => (item.source || '').toLowerCase().includes('gsm'));
     }
     
     if (filteredData.length === 0) {

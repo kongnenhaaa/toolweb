@@ -15,6 +15,8 @@
     <script src="https://unpkg.com/lucide@latest"></script>
     <!-- Chart.js -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/date-fns"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns"></script>
     <!-- SheetJS for Excel Export -->
     <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
 </head>
@@ -1397,6 +1399,14 @@
                         <option value="24h">24 giờ qua</option>
                         <option value="7d">7 ngày qua</option>
                         <option value="30d">30 ngày qua (1 tháng)</option>
+                    </select>
+                </div>
+                <div class="form-group" style="margin-top: 12px;">
+                    <label>Chọn nguồn cung cấp OTP:</label>
+                    <select id="export-source-filter" class="form-control" style="width: 100%; margin-top: 8px;">
+                        <option value="all">Tất cả (Firefox & Local)</option>
+                        <option value="firefox">Chỉ hệ thống Firefox</option>
+                        <option value="local">Chỉ hệ thống GSM Local</option>
                     </select>
                 </div>
             </div>
