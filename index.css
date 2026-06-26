@@ -80,7 +80,6 @@ body::-webkit-scrollbar {
     flex-direction: column;
     padding: 0 16px;
     gap: 8px;
-    flex: 1;
 }
 
 .nav-item {

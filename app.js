@@ -1811,11 +1811,15 @@ document.getElementById('nav-active').addEventListener('click', (e) => {
     document.getElementById('nav-history').classList.remove('active');
     const navFirefox = document.getElementById('nav-firefox');
     if (navFirefox) navFirefox.classList.remove('active');
+    const navGuide = document.getElementById('nav-guide');
+    if (navGuide) navGuide.classList.remove('active');
 
     document.getElementById('active-view').style.display = 'flex';
     document.getElementById('history-view').style.display = 'none';
     const firefoxView = document.getElementById('firefox-view');
     if (firefoxView) firefoxView.style.display = 'none';
+    const guideView = document.getElementById('guide-view');
+    if (guideView) guideView.style.display = 'none';
 
     const topBarControls = document.getElementById('top-bar-controls');
     if (topBarControls) topBarControls.style.display = 'flex';
@@ -1869,16 +1873,21 @@ document.getElementById('nav-history').addEventListener('click', (e) => {
     document.getElementById('nav-active').classList.remove('active');
     const navFirefox = document.getElementById('nav-firefox');
     if (navFirefox) navFirefox.classList.remove('active');
+    const navGuide = document.getElementById('nav-guide');
+    if (navGuide) navGuide.classList.remove('active');
 
     document.getElementById('active-view').style.display = 'none';
     document.getElementById('history-view').style.display = 'flex';
     const firefoxView = document.getElementById('firefox-view');
     if (firefoxView) firefoxView.style.display = 'none';
+    const guideView = document.getElementById('guide-view');
+    if (guideView) guideView.style.display = 'none';
 
     const topBarControls = document.getElementById('top-bar-controls');
     if (topBarControls) topBarControls.style.display = 'none';
 
-    document.getElementById('page-title').textContent = 'Lịch sử OTP';
+    const pageTitle = document.getElementById('page-title');
+    if (pageTitle) pageTitle.textContent = 'Lịch sử OTP';
     reloadHistoryAndRender();
 });
 
@@ -1889,15 +1898,41 @@ if (navFirefoxBtn) {
         navFirefoxBtn.classList.add('active');
         document.getElementById('nav-active').classList.remove('active');
         document.getElementById('nav-history').classList.remove('active');
+        const navGuide = document.getElementById('nav-guide');
+        if (navGuide) navGuide.classList.remove('active');
 
         document.getElementById('active-view').style.display = 'none';
         document.getElementById('history-view').style.display = 'none';
         document.getElementById('firefox-view').style.display = 'block'; // Or flex if preferred
+        const guideView = document.getElementById('guide-view');
+        if (guideView) guideView.style.display = 'none';
 
         const topBarControls = document.getElementById('top-bar-controls');
         if (topBarControls) topBarControls.style.display = 'none';
 
         renderFirefoxPorts();
+    });
+}
+
+const navGuideBtn = document.getElementById('nav-guide');
+if (navGuideBtn) {
+    navGuideBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        navGuideBtn.classList.add('active');
+        document.getElementById('nav-active').classList.remove('active');
+        document.getElementById('nav-history').classList.remove('active');
+        const navFirefox = document.getElementById('nav-firefox');
+        if (navFirefox) navFirefox.classList.remove('active');
+
+        document.getElementById('active-view').style.display = 'none';
+        document.getElementById('history-view').style.display = 'none';
+        const firefoxView = document.getElementById('firefox-view');
+        if (firefoxView) firefoxView.style.display = 'none';
+        const guideView = document.getElementById('guide-view');
+        if (guideView) guideView.style.display = 'block';
+
+        const topBarControls = document.getElementById('top-bar-controls');
+        if (topBarControls) topBarControls.style.display = 'none';
     });
 }
 
