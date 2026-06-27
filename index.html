@@ -24,10 +24,9 @@
 <body>
     <canvas id="snow-canvas" style="position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; pointer-events: none; z-index: 9999; opacity: 0.4;"></canvas>
     <script>
-        window.isSnowEnabled = localStorage.getItem('snowEnabled') !== 'false';
+        window.isSnowEnabled = false;
         window.toggleSnowSetting = function(checkbox) {
             window.isSnowEnabled = checkbox.checked;
-            localStorage.setItem('snowEnabled', window.isSnowEnabled);
         };
         
         document.addEventListener('DOMContentLoaded', () => {
@@ -97,10 +96,7 @@
             function loop() {
                 requestAnimationFrame(loop);
                 
-                const loginContainer = document.getElementById('login-container');
-                const isLoginVisible = loginContainer && window.getComputedStyle(loginContainer).display !== 'none';
-                
-                if (window.isSnowEnabled || isLoginVisible) {
+                if (window.isSnowEnabled) {
                     canvas.style.display = 'block';
                     draw();
                 } else {
@@ -394,23 +390,22 @@
                     <i data-lucide="settings"></i>
                     Cài đặt
                 </a>
+
                 <a href="#" class="nav-item" id="nav-admin" style="display: none;">
                     <i data-lucide="users"></i>
                     Quản lý Khách
                 </a>
-                <a href="#" class="nav-item" id="nav-dashboard">
+                <a href="#" class="nav-item" id="nav-dashboard" style="display: none;">
                     <i data-lucide="pie-chart"></i>
                     Thống kê
                 </a>
-                <a href="#" class="nav-item" id="nav-guide">
-                    <i data-lucide="book-open"></i>
-                    Hướng dẫn
-                </a>
-                <a href="#" class="nav-item" id="nav-contact">
-                    <i data-lucide="phone-call"></i>
-                    Liên hệ
-                </a>
+
             </nav>
+
+            <a href="#" class="nav-item" onclick="window.showConfirm('Bạn có chắc chắn muốn đăng xuất?').then(res => { if(res) auth.signOut(); }); return false;" style="margin-top: auto; margin-left: 16px; margin-right: 16px; color: var(--danger);">
+                <i data-lucide="log-out"></i>
+                Đăng xuất
+            </a>
 
             <div class="sidebar-note" style="margin-top: 24px; padding: 16px;">
                 <label style="font-size: 13px; color: var(--text-muted); display: block; margin-bottom: 8px;">
@@ -1339,7 +1334,7 @@
                     style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 0; margin-top: 16px;">
                     <label style="margin-bottom: 0; font-size: 15px; font-weight: 500;">Hiệu ứng tuyết rơi</label>
                     <label class="switch">
-                        <input type="checkbox" id="setting-snow-toggle" onchange="toggleSnowSetting(this)" checked>
+                        <input type="checkbox" id="setting-snow-toggle" onchange="toggleSnowSetting(this)">
                         <span class="slider round"></span>
                     </label>
                 </div>

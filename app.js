@@ -1880,7 +1880,7 @@ function showToast(message, type = 'success') {
 
 // Navigation Helper
 function setActiveNav(activeId) {
-    const navs = ['nav-active', 'nav-history', 'nav-firefox', 'nav-guide', 'nav-contact', 'nav-admin', 'nav-dashboard'];
+    const navs = ['nav-active', 'nav-history', 'nav-firefox', 'nav-admin', 'nav-dashboard'];
     navs.forEach(id => {
         const el = document.getElementById(id);
         if (el) {
@@ -1892,7 +1892,13 @@ function setActiveNav(activeId) {
 
 // Navigation
 document.getElementById('logo-home').addEventListener('click', () => {
-    document.getElementById('nav-active').click();
+    const navActive = document.getElementById('nav-active');
+    if (navActive && navActive.style.display !== 'none') {
+        navActive.click();
+    } else {
+        const navFirefox = document.getElementById('nav-firefox');
+        if (navFirefox) navFirefox.click();
+    }
 });
 
 document.getElementById('nav-active').addEventListener('click', (e) => {
@@ -2008,29 +2014,6 @@ if (navFirefoxBtn) {
     });
 }
 
-const navGuideBtn = document.getElementById('nav-guide');
-if (navGuideBtn) {
-    navGuideBtn.addEventListener('click', (e) => {
-        e.preventDefault();
-        setActiveNav('nav-guide');
-
-        document.getElementById('active-view').style.display = 'none';
-        document.getElementById('history-view').style.display = 'none';
-        const firefoxView = document.getElementById('firefox-view');
-        if (firefoxView) firefoxView.style.display = 'none';
-        const guideView = document.getElementById('guide-view');
-        if (guideView) guideView.style.display = 'block';
-        const contactView = document.getElementById('contact-view');
-        if (contactView) contactView.style.display = 'none';
-        const adminView = document.getElementById('admin-view');
-        if (adminView) adminView.style.display = 'none';
-        const dashboardView = document.getElementById('dashboard-view');
-        if (dashboardView) dashboardView.style.display = 'none';
-
-        const topBarControls = document.getElementById('top-bar-controls');
-        if (topBarControls) topBarControls.style.display = 'none';
-    });
-}
 
 const navAdminBtn = document.getElementById('nav-admin');
 if (navAdminBtn) {
@@ -2059,28 +2042,6 @@ if (navAdminBtn) {
     });
 }
 
-const navContactBtn = document.getElementById('nav-contact');
-if (navContactBtn) {
-    navContactBtn.addEventListener('click', (e) => {
-        e.preventDefault();
-        setActiveNav('nav-contact');
-
-        document.getElementById('active-view').style.display = 'none';
-        document.getElementById('history-view').style.display = 'none';
-        const firefoxView = document.getElementById('firefox-view');
-        if (firefoxView) firefoxView.style.display = 'none';
-        const guideView = document.getElementById('guide-view');
-        if (guideView) guideView.style.display = 'none';
-        const contactView = document.getElementById('contact-view');
-        if (contactView) contactView.style.display = 'block';
-        const adminView = document.getElementById('admin-view');
-        if (adminView) adminView.style.display = 'none';
-        const dashboardView = document.getElementById('dashboard-view');
-        if (dashboardView) dashboardView.style.display = 'none';
-        const topBarControls = document.getElementById('top-bar-controls');
-        if (topBarControls) topBarControls.style.display = 'none';
-    });
-}
 
 const navDashboardBtn = document.getElementById('nav-dashboard');
 if (navDashboardBtn) {
@@ -2758,12 +2719,15 @@ auth.onAuthStateChanged(async (user) => {
             document.getElementById('login-container').style.display = 'none';
             document.getElementById('main-app').style.display = 'flex';
             
-            // RBAC: Show/hide Admin tab
+            // RBAC: Show/hide Admin and Dashboard tabs
             const navAdmin = document.getElementById('nav-admin');
+            const navDashboard = document.getElementById('nav-dashboard');
             if (currentUserProfile.role === 'admin') {
                 if (navAdmin) navAdmin.style.display = 'flex';
+                if (navDashboard) navDashboard.style.display = 'flex';
             } else {
                 if (navAdmin) navAdmin.style.display = 'none';
+                if (navDashboard) navDashboard.style.display = 'none';
             }
             
             showToast(`Xin chào, ID của bạn là: ${currentUserProfile.customerId}`);
@@ -2776,6 +2740,12 @@ auth.onAuthStateChanged(async (user) => {
         }
     } else {
         // Chưa đăng nhập
+        if (isAppInitialized) {
+            // Tải lại trang để xoá toàn bộ listener Firebase (tránh lỗi permission_denied)
+            window.location.reload();
+            return;
+        }
+        
         currentUserProfile = null;
         document.getElementById('login-container').style.display = 'flex';
         document.getElementById('main-app').style.display = 'none';
@@ -2803,6 +2773,26 @@ function initializeAppFlow() {
     }
     
     loadFirefoxConfig();
+
+    if (currentUserProfile && currentUserProfile.role !== 'admin' && auth.currentUser) {
+        db.ref(`users/${auth.currentUser.uid}/allowGsmTool`).on('value', (snapshot) => {
+            const isAllowed = snapshot.val();
+            if (currentUserProfile) currentUserProfile.allowGsmTool = isAllowed;
+            
+            const navActive = document.getElementById('nav-active');
+            if (navActive) {
+                if (isAllowed) {
+                    navActive.style.display = 'flex';
+                } else {
+                    navActive.style.display = 'none';
+                    if (navActive.classList.contains('active')) {
+                        const navFirefox = document.getElementById('nav-firefox');
+                        if (navFirefox) navFirefox.click();
+                    }
+                }
+            }
+        });
+    }
 
 
     // Global Note Sync
