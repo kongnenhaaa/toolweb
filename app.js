@@ -597,6 +597,7 @@ async function applyCommandResult(commandId, result) {
 
 
 function scheduleAutoHistory(portId, machineId) {
+    if (currentUserProfile && currentUserProfile.role !== 'admin' && currentUserProfile.allowGsmTool === false) return;
     // Dùng key kết hợp portId và machineId để tránh xung đột
     const timeoutKey = `${machineId}_${portId}`;
     if (autoHistoryTimeouts[timeoutKey]) {
@@ -681,6 +682,7 @@ let isInitialFirebaseLoad = true;
 
 function fetchPorts() {
     db.ref('machines').on('value', (snapshot) => {
+        if (currentUserProfile && currentUserProfile.role !== 'admin' && currentUserProfile.allowGsmTool === false) return;
         const machinesData = snapshot.val();
         let allPorts = [];
         const now = Date.now() + serverTimeOffset;
@@ -1112,10 +1114,13 @@ function renderHistory() {
         const row = document.createElement('div');
         row.className = 'grid-row';
 
+        const smsContent = item.smsContent ? escapeHtml(item.smsContent) : '<span style="color:gray; font-style:italic">Không có nội dung</span>';
+        
         row.innerHTML = `
             <div class="col-port">${escapeHtml(item.id)} <br><span style="font-size: 11px; color: #aaa;">${escapeHtml(item.machineId || '')}</span></div>
             <div class="col-phone">${item.phone ? escapeHtml(normalizePhoneNumber(item.phone)) : '<span style="color:gray; font-style:italic">Trống</span>'}</div>
             <div class="col-otp"><span style="color: var(--success); font-weight: bold;">${escapeHtml(item.otp)}</span></div>
+            <div class="col-content" title="${escapeHtml(item.smsContent || '')}">${smsContent}</div>
             <div class="col-time">${escapeHtml(item.usedTime)}</div>
             <div class="col-actions">
                 <button class="btn btn-primary" onclick="restoreFromHistory('${item.id}', '${item.machineId}', '${item.usedTime}', '${item.fbKey}')" title="Khôi phục trạng thái hoạt động">
@@ -1155,15 +1160,17 @@ function exportHistoryToExcel() {
         <body>
             <table>
                 <tr>
-                    <td colspan="4" class="title-row">BÁO CÁO LỊCH SỬ NHẬN OTP</td>
+                    <td colspan="6" class="title-row">BÁO CÁO LỊCH SỬ NHẬN OTP</td>
                 </tr>
                 <tr>
-                    <td colspan="4" style="text-align: center; font-style: italic; height: 30px; font-size: 11pt;">Ngày xuất báo cáo: ${new Date().toLocaleString('vi-VN')}</td>
+                    <td colspan="6" style="text-align: center; font-style: italic; height: 30px; font-size: 11pt;">Ngày xuất báo cáo: ${new Date().toLocaleString('vi-VN')}</td>
                 </tr>
                 <tr>
                     <th style="width: 80px;">Cổng</th>
+                    <th style="width: 100px;">Máy</th>
                     <th style="width: 150px;">Số Điện Thoại</th>
                     <th style="width: 150px;">OTP Đã Nhận</th>
+                    <th style="width: 250px;">Nội dung</th>
                     <th style="width: 200px;">Thời Gian Nhận</th>
                 </tr>
     `;
@@ -1720,6 +1727,7 @@ window.refreshAllPorts = function () {
 // Mark as Used
 async function markAsUsed(portId, machineId) {
     if (isImpersonating) return showToast('Bạn đang ở chế độ Chỉ Đọc', 'error');
+    if (currentUserProfile && currentUserProfile.role !== 'admin' && currentUserProfile.allowGsmTool === false) return;
     const timeoutKey = `${machineId}_${portId}`;
     if (autoHistoryTimeouts[timeoutKey]) {
         clearTimeout(autoHistoryTimeouts[timeoutKey]);
@@ -1938,13 +1946,22 @@ async function reloadHistoryAndRender() {
 
         const data = snapshot.val();
 
-        const firebaseHistory = data
+        let firebaseHistory = data
             ? Object.entries(data).map(([key, value]) => ({
                 ...value,
                 phone: value?.phone ? normalizePhoneNumber(value.phone) : value?.phone,
                 fbKey: key
             }))
             : [];
+
+        let allowGsmTool = true;
+        if (currentUserProfile && currentUserProfile.role !== 'admin') {
+            allowGsmTool = currentUserProfile.allowGsmTool !== false;
+        } else if (typeof isImpersonating !== 'undefined' && isImpersonating && window.viewingTenantId) {
+            const u = adminUsersData && Object.values(adminUsersData).find(u => u.customerId === window.viewingTenantId);
+            if (u) allowGsmTool = u.allowGsmTool !== false;
+        }
+        if (!allowGsmTool) firebaseHistory = firebaseHistory.filter(item => item.source === 'firefox' || item.machineId === 'FIREFOX_API');
 
         let localHistory = [];
         try {
@@ -1953,6 +1970,7 @@ async function reloadHistoryAndRender() {
         } catch {
             localHistory = [];
         }
+        if (!allowGsmTool) localHistory = localHistory.filter(item => item.source === 'firefox' || item.machineId === 'FIREFOX_API');
 
         state.history = [...firebaseHistory, ...localHistory];
         renderHistory();
@@ -2829,13 +2847,22 @@ function initializeAppFlow() {
       .on('value', (snapshot) => {
           const data = snapshot.val();
 
-          const firebaseHistory = data
+          let firebaseHistory = data
               ? Object.entries(data).map(([key, value]) => ({
                   ...value,
                   phone: value?.phone ? normalizePhoneNumber(value.phone) : value?.phone,
                   fbKey: key
               }))
               : [];
+
+          let allowGsmTool = true;
+          if (currentUserProfile && currentUserProfile.role !== 'admin') {
+              allowGsmTool = currentUserProfile.allowGsmTool !== false;
+          } else if (typeof isImpersonating !== 'undefined' && isImpersonating && window.viewingTenantId) {
+              const u = adminUsersData && Object.values(adminUsersData).find(u => u.customerId === window.viewingTenantId);
+              if (u) allowGsmTool = u.allowGsmTool !== false;
+          }
+          if (!allowGsmTool) firebaseHistory = firebaseHistory.filter(item => item.source === 'firefox' || item.machineId === 'FIREFOX_API');
 
           let localHistory = [];
           try {
@@ -2844,6 +2871,7 @@ function initializeAppFlow() {
           } catch {
               localHistory = [];
           }
+          if (!allowGsmTool) localHistory = localHistory.filter(item => item.source === 'firefox' || item.machineId === 'FIREFOX_API');
 
           state.history = [...firebaseHistory, ...localHistory];
 
@@ -3894,14 +3922,25 @@ window.loadDashboardData = function (tenantTarget) {
                 if (tenantTarget === 'all' && currentUserProfile.role === 'admin') {
                     Object.keys(data).forEach(tId => {
                         if (data[tId].history) {
-                            const custEmail = adminUsersData && Object.values(adminUsersData).find(u => u.customerId === tId)?.email || tId;
+                            const u = adminUsersData && Object.values(adminUsersData).find(u => u.customerId === tId);
+                            const allowGsmTool = u ? u.allowGsmTool !== false : true;
+                            const custEmail = u ? u.email : tId;
                             Object.entries(data[tId].history).forEach(([key, val]) => {
+                                if (!allowGsmTool && val.source !== 'firefox' && val.machineId !== 'FIREFOX_API') return;
                                 allHistory.push({...val, _customerId: tId, _email: custEmail});
                             });
                         }
                     });
                 } else {
+                    let allowGsmTool = true;
+                    if (currentUserProfile && currentUserProfile.role !== 'admin') {
+                        allowGsmTool = currentUserProfile.allowGsmTool !== false;
+                    } else if (adminUsersData) {
+                        const u = Object.values(adminUsersData).find(u => u.customerId === targetId);
+                        if (u) allowGsmTool = u.allowGsmTool !== false;
+                    }
                     Object.entries(data).forEach(([key, val]) => {
+                        if (!allowGsmTool && val.source !== 'firefox' && val.machineId !== 'FIREFOX_API') return;
                         allHistory.push({...val, _customerId: targetId, _email: targetEmail});
                     });
                 }
@@ -3958,7 +3997,10 @@ function renderAdminDashboardStats(tenantsData) {
         let todayUsed = 0, totalUsed = 0;
         const tenantData = tenantsData ? tenantsData[u.customerId] : null;
         if (tenantData && tenantData.history) {
-            const historyVals = Object.values(tenantData.history);
+            let historyVals = Object.values(tenantData.history);
+            if (u.allowGsmTool === false) {
+                historyVals = historyVals.filter(item => item.source === 'firefox' || item.machineId === 'FIREFOX_API');
+            }
             totalUsed = historyVals.length;
             todayUsed = historyVals.filter(item => {
                 const ts = Number(item.timestamp || 0);

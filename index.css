@@ -573,6 +573,7 @@ h1 {
 .col-phone { width: 160px; font-family: 'Outfit', sans-serif; font-size: 16px; }
 .col-tkc { width: 120px; font-family: 'Outfit', sans-serif; font-size: 16px; color: var(--success); font-weight: 600; }
 .col-otp { flex: 1; font-family: 'Outfit', sans-serif; font-size: 18px; color: var(--warning); font-weight: 700; }
+.col-content { flex: 2; font-size: 13px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: 16px; }
 .col-actions { width: 300px; display: flex; gap: 8px; justify-content: flex-end; }
 .col-time { width: 150px; color: var(--text-muted); font-size: 14px; }
 .col-admin-email { flex: 2; font-weight: 500; overflow: hidden; text-overflow: ellipsis; }

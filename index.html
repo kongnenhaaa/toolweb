@@ -402,12 +402,12 @@
 
             </nav>
 
-            <a href="#" class="nav-item" onclick="window.showConfirm('Bạn có chắc chắn muốn đăng xuất?').then(res => { if(res) auth.signOut(); }); return false;" style="margin-top: auto; margin-left: 16px; margin-right: 16px; color: var(--danger);">
+            <a href="#" class="nav-item" onclick="window.showConfirm('Bạn có chắc chắn muốn đăng xuất?').then(res => { if(res) auth.signOut(); }); return false;" style="margin-top: 8px; margin-left: 16px; margin-right: 16px; color: var(--danger);">
                 <i data-lucide="log-out"></i>
                 Đăng xuất
             </a>
 
-            <div class="sidebar-note" style="margin-top: 24px; padding: 16px;">
+            <div class="sidebar-note" style="margin-top: 8px; padding: 16px;">
                 <label style="font-size: 13px; color: var(--text-muted); display: block; margin-bottom: 8px;">
                     <i data-lucide="edit-3"
                         style="width: 14px; height: 14px; display: inline-block; vertical-align: middle;"></i> Ghi chú
@@ -573,6 +573,7 @@
                         <div class="col-port">Cổng</div>
                         <div class="col-phone">Số Điện Thoại</div>
                         <div class="col-otp">OTP Đã Nhận</div>
+                        <div class="col-content">Nội Dung</div>
                         <div class="col-time">Thời Gian</div>
                         <div class="col-actions">Hành Động</div>
                     </div>
@@ -969,7 +970,7 @@
                         <div>Trạng thái</div>
                         <div>Ghi chú</div>
                     </div>
-                    <div class="grid-body" id="dash-history-list" style="padding: 0; overflow-y: auto;">
+                    <div class="grid-body" id="dash-history-list" style="padding: 0; overflow-y: auto; flex: 1 1 auto; min-height: 0;">
                         <!-- Rendered by JS -->
                     </div>
                 </div>
