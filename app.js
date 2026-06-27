@@ -2512,14 +2512,17 @@ window.openAdminLogsModal = async function() {
                 case 'RESET_PASSWORD': actionText = 'Reset Mật khẩu'; actionColor = 'var(--warning)'; break;
             }
             
-            let byEmail = 'N/A';
-            if (adminUsersData[item.by]) byEmail = adminUsersData[item.by].email;
+            let byEmail = item.adminEmail || item.by || 'N/A';
+            if (item.by && adminUsersData[item.by]) byEmail = adminUsersData[item.by].email;
             
-            let targetEmail = item.targetUid;
-            if (adminUsersData[item.targetUid]) targetEmail = adminUsersData[item.targetUid].email;
+            let targetEmail = item.targetEmail || item.targetUid || 'N/A';
+            if (item.targetUid && adminUsersData[item.targetUid]) targetEmail = adminUsersData[item.targetUid].email;
             
             const row = document.createElement('div');
             row.className = 'grid-row';
+            row.style.display = 'grid';
+            row.style.gap = '8px';
+            row.style.gridTemplateColumns = '140px 180px 140px 1fr';
             row.style.borderBottom = '1px solid var(--border-color)';
             row.innerHTML = `
                 <div style="font-size: 12px; color: var(--text-muted);">${dateStr}</div>

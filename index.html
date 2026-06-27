@@ -1182,13 +1182,13 @@
                 <button class="close-btn" onclick="closeModal('admin-logs-modal')"><i data-lucide="x"></i></button>
             </div>
             <div class="modal-body" style="padding: 0;">
-                <div class="grid-header" style="grid-template-columns: 140px 180px 140px 1fr; background: rgba(0,0,0,0.2); margin: 0; border-radius: 0;">
+                <div class="grid-header" style="display: grid; gap: 8px; grid-template-columns: 140px 180px 140px 1fr; background: rgba(0,0,0,0.2); margin: 0; border-radius: 0;">
                     <div>Thời gian</div>
                     <div>Thực hiện bởi</div>
                     <div>Thao tác</div>
                     <div>Mục tiêu</div>
                 </div>
-                <div class="grid-body" id="admin-logs-list" style="max-height: 400px; padding: 0;">
+                <div class="grid-body" id="admin-logs-list" style="max-height: 400px; padding: 0; overflow-y: auto;">
                     <!-- Renders by JS -->
                 </div>
             </div>
@@ -1355,7 +1355,7 @@
             </div>
             <div class="modal-body" style="flex: 1; overflow-y: auto; padding: 0;">
                 <div class="table-container" style="margin: 0; border: none; border-radius: 0;">
-                    <div class="grid-header" style="grid-template-columns: 150px 200px 200px 1fr;">
+                    <div class="grid-header" style="display: grid; gap: 8px; grid-template-columns: 150px 200px 200px 1fr;">
                         <div>Thời gian</div>
                         <div>Người thực hiện</div>
                         <div>Hành động</div>
