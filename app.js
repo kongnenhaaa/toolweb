@@ -4430,7 +4430,33 @@ window.fastCopy = function(elementId) {
     }
 }
 
-window.showDashStatDetails = function(type) {
+window.currentDashStatType = null;
+window.currentDashStatFilter = 'all';
+
+window.filterDashStat = function(filter) {
+    window.currentDashStatFilter = filter;
+    ['all', 'local', 'firefox'].forEach(f => {
+        const btn = document.getElementById('tab-dash-' + f);
+        if (btn) btn.className = f === filter ? 'btn btn-primary btn-sm' : 'btn btn-outline btn-sm';
+    });
+    if (window.currentDashStatType) {
+        showDashStatDetails(window.currentDashStatType, true);
+    }
+};
+
+window.showDashStatDetails = function(type, isFilterClick = false) {
+    const modal = document.getElementById('dash-stat-details-modal');
+    if (!isFilterClick && modal && !modal.classList.contains('active')) {
+        window.currentDashStatFilter = 'all';
+        ['all', 'local', 'firefox'].forEach(f => {
+            const btn = document.getElementById('tab-dash-' + f);
+            if (btn) btn.className = f === 'all' ? 'btn btn-primary btn-sm' : 'btn btn-outline btn-sm';
+        });
+    }
+    
+    window.currentDashStatType = type;
+    const tabsContainer = document.getElementById('dash-stat-tabs');
+
     const list = document.getElementById('dash-stat-modal-list');
     const header = document.getElementById('dash-stat-modal-header');
     const title = document.getElementById('dash-stat-modal-title');
@@ -4438,6 +4464,7 @@ window.showDashStatDetails = function(type) {
     list.innerHTML = '';
     
     if (type === 'today' || type === 'yesterday' || type === 'month') {
+        if (tabsContainer) tabsContainer.style.display = 'flex';
         if (!window.currentDashboardHistory) return;
         
         const now = new Date();
@@ -4453,9 +4480,20 @@ window.showDashStatDetails = function(type) {
                 if (timeParts.length > 1) ts = now.getTime();
             }
             if (ts <= 0) return false;
-            if (type === 'today') return ts >= dToday.getTime();
-            if (type === 'yesterday') return ts >= dYesterday.getTime() && ts < dToday.getTime();
-            if (type === 'month') return ts >= dMonthStart.getTime();
+            
+            let matchTime = false;
+            if (type === 'today') matchTime = (ts >= dToday.getTime());
+            else if (type === 'yesterday') matchTime = (ts >= dYesterday.getTime() && ts < dToday.getTime());
+            else if (type === 'month') matchTime = (ts >= dMonthStart.getTime());
+            
+            if (!matchTime) return false;
+            
+            if (window.currentDashStatFilter && window.currentDashStatFilter !== 'all') {
+                const src = (item.source || '').toLowerCase();
+                if (window.currentDashStatFilter === 'local' && !src.includes('local') && !src.includes('gsm')) return false;
+                if (window.currentDashStatFilter === 'firefox' && !src.includes('firefox')) return false;
+            }
+            return true;
         });
         
         const titleStr = type === 'today' ? 'OTP Hôm Nay' : (type === 'yesterday' ? 'OTP Hôm Qua' : 'OTP Tháng Này');
@@ -4511,6 +4549,7 @@ window.showDashStatDetails = function(type) {
             });
         }
     } else if (type === 'devices') {
+        if (tabsContainer) tabsContainer.style.display = 'none';
         const serverNow = Date.now() + serverTimeOffset;
         const aliveMachines = [];
         Object.keys(lastSyncByMachine).forEach(mId => {

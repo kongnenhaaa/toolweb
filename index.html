@@ -1269,7 +1269,8 @@
     </div>
 
     <!-- Settings Modal -->
-    <div class="modal-overlay" id="transaction-details-modal">
+    <!-- Modal Transaction Details -->
+    <div class="modal-overlay" id="transaction-details-modal" style="z-index: 1010;">
         <div class="modal" style="width: 500px; max-width: 95vw;">
             <div class="modal-header">
                 <h2>Chi tiết Giao dịch</h2>
@@ -1447,28 +1448,14 @@
 
     <div class="modal-overlay" id="dash-stat-details-modal">
         <div class="modal" style="width: 800px; max-width: 95vw; max-height: 90vh; display: flex; flex-direction: column;">
-            <div class="modal-header">
-                <h2 id="dash-stat-modal-title">Chi tiết</h2>
-                <button class="close-btn" onclick="closeModal('dash-stat-details-modal')"><i data-lucide="x"></i></button>
-            </div>
-            <div class="modal-body" style="flex: 1; overflow: hidden; display: flex; flex-direction: column; padding: 0;">
-                <div class="grid-container" style="flex: 1; overflow-y: auto; margin: 0; border: none; border-radius: 0;">
-                    <div class="grid-header" id="dash-stat-modal-header" style="display: grid; grid-template-columns: 140px 140px 100px 140px 140px 1fr; position: sticky; top: 0; z-index: 1;">
-                        <!-- Dynamically populated -->
-                    </div>
-                    <div id="dash-stat-modal-list">
-                        <!-- Dynamically populated -->
-                    </div>
+            <div class="modal-header" style="flex-direction: column; align-items: flex-start; position: relative;">
+                <h2 id="dash-stat-modal-title" style="margin: 0;">Chi tiết</h2>
+                <div id="dash-stat-tabs" style="display: none; gap: 8px; margin-top: 12px;">
+                    <button class="btn btn-primary btn-sm" id="tab-dash-all" onclick="filterDashStat('all')" style="padding: 6px 12px; font-size: 12px;">Tất cả</button>
+                    <button class="btn btn-outline btn-sm" id="tab-dash-local" onclick="filterDashStat('local')" style="padding: 6px 12px; font-size: 12px;">Local</button>
+                    <button class="btn btn-outline btn-sm" id="tab-dash-firefox" onclick="filterDashStat('firefox')" style="padding: 6px 12px; font-size: 12px;">Firefox</button>
                 </div>
-            </div>
-        </div>
-    </div>
-
-    <div class="modal-overlay" id="dash-stat-details-modal">
-        <div class="modal" style="width: 800px; max-width: 95vw; max-height: 90vh; display: flex; flex-direction: column;">
-            <div class="modal-header">
-                <h2 id="dash-stat-modal-title">Chi tiết</h2>
-                <button class="close-btn" onclick="closeModal('dash-stat-details-modal')"><i data-lucide="x"></i></button>
+                <button class="close-btn" onclick="closeModal('dash-stat-details-modal')" style="position: absolute; right: 16px; top: 16px;"><i data-lucide="x"></i></button>
             </div>
             <div class="modal-body" style="flex: 1; overflow: hidden; display: flex; flex-direction: column; padding: 0;">
                 <div class="grid-container" style="flex: 1; overflow-y: auto; margin: 0; border: none; border-radius: 0;">
