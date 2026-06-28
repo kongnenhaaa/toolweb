@@ -4030,12 +4030,13 @@ function renderAdminDashboardStats(tenantsData) {
     
     const topUsersList = document.getElementById('dash-admin-top-users');
     topUsersList.innerHTML = '';
-    userUsages.sort((a, b) => b.today - a.today).slice(0, 10).forEach(u => {
+    userUsages.sort((a, b) => b.today !== a.today ? b.today - a.today : b.total - a.total).slice(0, 10).forEach(u => {
         const row = document.createElement('div');
         row.className = 'grid-row';
         row.style.display = 'grid';
         row.style.gridTemplateColumns = '1fr 80px 80px';
-        row.innerHTML = `<div>${escapeHtml(u.email)}</div><div style="font-weight: 600; color: var(--success);">${u.today}</div><div style="color: var(--text-muted);">${u.total}</div>`;
+        const todayColor = u.today > 0 ? 'var(--success)' : 'var(--text-muted)';
+        row.innerHTML = `<div>${escapeHtml(u.email)}</div><div style="font-weight: 600; color: ${todayColor};">${u.today}</div><div style="color: var(--text-muted);">${u.total}</div>`;
         topUsersList.appendChild(row);
     });
 }
