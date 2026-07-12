@@ -16,6 +16,16 @@ let commandResults = {};
 let appliedCommandResults = {};
 let sendingSmsPorts = new Set();
 let soundEnabled = localStorage.getItem('gsm_sound_enabled') !== 'false'; // default true
+let globalAdminHiddenNumbers = [];
+
+window.saveHiddenNumbers = async function() {
+    const el = document.getElementById('setting-hidden-numbers');
+    if (!el) return;
+    const val = el.value || '';
+    const numbers = val.split(',').map(n => normalizePhoneNumber(n.trim())).filter(n => n);
+    await db.ref('global_hidden_numbers').set(numbers);
+    showToast('Đã lưu danh sách số bị ẩn', 'success');
+};
 
 const SMS_WAIT_TIMEOUT_MS = 120000;
 const BALANCE_WAIT_TIMEOUT_MS = 45000;
@@ -901,7 +911,18 @@ function getVisibleActivePorts() {
     }
 
     // After assigning the stable chunk, filter out the hidden ones
-    let portsToRender = myAssignedPorts.filter(p => !p.hidden);
+    let portsToRender = myAssignedPorts.filter(p => {
+        if (p.hidden) return false;
+        
+        // Hide global admin hidden numbers from non-admin users
+        if (currentUserProfile && currentUserProfile.role !== 'admin' && p.phone) {
+            const cleanPhone = normalizePhoneNumber(p.phone);
+            if (globalAdminHiddenNumbers.includes(cleanPhone)) {
+                return false;
+            }
+        }
+        return true;
+    });
 
     const filter5kChecked = document.getElementById('filter-balance-5k')?.checked;
     if (filter5kChecked) {
@@ -938,13 +959,17 @@ function getVisibleActivePorts() {
 function renderPorts() {
     const container = document.getElementById('ports-container');
     renderOperationalPanels();
-    container.innerHTML = '';
 
     const portsToRender = getVisibleActivePorts();
 
     if (portsToRender.length === 0) {
         container.innerHTML = `<div style="padding: 40px; text-align: center; color: var(--text-muted);">Không có cổng nào (hoặc đã dùng hết) trong phần này.</div>`;
         return;
+    }
+
+    // Xóa thông báo trống nếu có
+    if (container.firstElementChild && !container.firstElementChild.classList.contains('machine-header') && !container.firstElementChild.classList.contains('grid-row')) {
+        container.innerHTML = '';
     }
 
     // Nhóm cổng theo Machine
@@ -955,21 +980,66 @@ function renderPorts() {
         groupedPorts[mId].push(p);
     });
 
-    Object.keys(groupedPorts).forEach(machineId => {
-        // Render Machine Header
-        const header = document.createElement('div');
-        header.className = 'machine-header';
-        header.innerHTML = `<i data-lucide="server"></i> Máy tính: <strong>${escapeHtml(machineId)}</strong> <span class="badge">${groupedPorts[machineId].length} cổng</span>`;
-        container.appendChild(header);
+    const activeMachineIds = new Set(Object.keys(groupedPorts));
+    const activeRowIds = new Set(portsToRender.map(p => `row-${p.machineId}-${p.id}`));
 
-        // Render từng cổng của máy này
+    // Xoá các element cũ (machine headers hoặc rows) không còn trong danh sách
+    Array.from(container.children).forEach(child => {
+        if (child.classList.contains('machine-header')) {
+            const mId = child.getAttribute('data-machine-id');
+            if (!activeMachineIds.has(mId)) {
+                child.remove();
+            }
+        } else if (child.classList.contains('grid-row')) {
+            if (!activeRowIds.has(child.id)) {
+                child.remove();
+            }
+        }
+    });
+
+    let currentDOMElement = container.firstElementChild;
+
+    Object.keys(groupedPorts).forEach(machineId => {
+        // Xử lý Machine Header
+        let header = container.querySelector(`.machine-header[data-machine-id="${machineId}"]`);
+        if (!header) {
+            header = document.createElement('div');
+            header.className = 'machine-header';
+            header.setAttribute('data-machine-id', machineId);
+            container.insertBefore(header, currentDOMElement);
+        } else {
+            if (currentDOMElement !== header) {
+                container.insertBefore(header, currentDOMElement);
+            }
+        }
+        
+        const headerHtml = `<i data-lucide="server"></i> Máy tính: <strong>${escapeHtml(machineId)}</strong> <span class="badge">${groupedPorts[machineId].length} cổng</span>`;
+        if (header.innerHTML !== headerHtml) {
+            header.innerHTML = headerHtml;
+        }
+        currentDOMElement = header.nextElementSibling;
+
+        // Xử lý các dòng cổng (rows)
         groupedPorts[machineId].forEach(port => {
-            const row = document.createElement('div');
-            row.className = 'grid-row';
+            const rowId = `row-${port.machineId}-${port.id}`;
+            let row = document.getElementById(rowId);
+            
+            if (!row) {
+                row = document.createElement('div');
+                row.className = 'grid-row';
+                row.id = rowId;
+                container.insertBefore(row, currentDOMElement);
+            } else {
+                if (currentDOMElement !== row) {
+                    container.insertBefore(row, currentDOMElement);
+                }
+            }
+
             if (port.smsSent) {
                 row.classList.add('row-highlight-warning');
+            } else {
+                row.classList.remove('row-highlight-warning');
             }
-            row.id = `row-${port.machineId}-${port.id}`;
 
             const uiStatus = getPortUiStatus(port);
             const statusDot = `<span class="status-pill ${uiStatus}">${escapeHtml(getPortUiStatusLabel(uiStatus))}</span>`;
@@ -979,10 +1049,20 @@ function renderPorts() {
             const isCommandBusy = COMMAND_IN_FLIGHT_STATUSES.has(port.commandStatus);
             const healthText = '';
 
+            let timerContent = '';
+            if (port.smsSent && port.smsSentTime) {
+                const elapsedSeconds = Math.floor((getServerNow() - port.smsSentTime) / 1000);
+                if (elapsedSeconds <= 60) {
+                    timerContent = `(${elapsedSeconds}s)`;
+                } else {
+                    timerContent = `(${Math.floor(elapsedSeconds / 60)}m ${elapsedSeconds % 60}s)`;
+                }
+            }
+
             let otpContent = port.smsSent ?
                 (port.commandStatus === 'maybe_sent' ?
-                    `<span style="color: #f39c12">Có thể đã gửi... <span class="wait-timer" data-port="${port.id}" data-machine="${port.machineId}"></span></span>` :
-                    `<span style="color: #f39c12">Đang chờ mã... <span class="wait-timer" data-port="${port.id}" data-machine="${port.machineId}"></span></span>`) :
+                    `<span style="color: #f39c12">Có thể đã gửi... <span class="wait-timer" data-port="${port.id}" data-machine="${port.machineId}">${timerContent}</span></span>` :
+                    `<span style="color: #f39c12">Đang chờ mã... <span class="wait-timer" data-port="${port.id}" data-machine="${port.machineId}">${timerContent}</span></span>`) :
                 '<span style="color: var(--text-muted)">Chưa gửi tin nhắn</span>';
             if (!port.smsSent && commandText) {
                 otpContent = `<span style="color: var(--warning); font-weight: 600;">${escapeHtml(commandText)}</span>`;
@@ -1018,7 +1098,7 @@ function renderPorts() {
                 `;
             }
 
-            row.innerHTML = `
+            const innerHTMLString = `
                 <div class="col-status">${statusDot}</div>
                 <div class="col-port">${escapeHtml(port.id)}${healthText}</div>
                 <div class="col-phone">${port.phone ? escapeHtml(normalizePhoneNumber(port.phone)) : '<span style="color:gray; font-style:italic">Trống</span>'}</div>
@@ -1029,7 +1109,12 @@ function renderPorts() {
                 </div>
             `;
 
-            container.appendChild(row);
+            // Chỉ cập nhật DOM nếu có sự thay đổi thực sự
+            if (row.innerHTML !== innerHTMLString) {
+                row.innerHTML = innerHTMLString;
+            }
+
+            currentDOMElement = row.nextElementSibling;
         });
     });
 
@@ -1330,6 +1415,17 @@ function toggleCustomRecipient() {
 
 function openSettingsModal() {
     document.getElementById('setting-sound-toggle').checked = soundEnabled;
+    
+    const adminSection = document.getElementById('admin-settings-section');
+    if (adminSection) {
+        if (currentUserProfile && currentUserProfile.role === 'admin') {
+            adminSection.style.display = 'block';
+            document.getElementById('setting-hidden-numbers').value = globalAdminHiddenNumbers.join(', ');
+        } else {
+            adminSection.style.display = 'none';
+        }
+    }
+    
     document.getElementById('settings-modal').classList.add('active');
 }
 
@@ -1601,6 +1697,17 @@ window.cancelSmsWait = async function (portId, machineId) {
     }
     promises.push(db.ref(`machines/${machineId}/ports/${portId}/otp`).remove());
 
+    // Gửi lệnh CLEAR_OTP xuống toolgsm để xoá OTP hiển thị cũ dưới client C#
+    promises.push(db.ref(`commands/${CLIENT_SESSION_ID}_clear_${portId}_${Date.now()}`).set({
+        portId: portId,
+        machineId: machineId,
+        type: 'system',
+        recipient: 'SYSTEM',
+        content: 'CLEAR_OTP',
+        status: 'queued',
+        createdAt: { '.sv': 'timestamp' }
+    }));
+
     await Promise.all(promises);
 
     // Xoá OTP trên giao diện nếu đang có
@@ -1649,6 +1756,18 @@ window.cancelAllSmsWait = async function () {
             promises.push(db.ref(`web_states/machines/${port.machineId}/ports/${port.id}`).remove());
         }
         promises.push(db.ref(`machines/${port.machineId}/ports/${port.id}/otp`).remove());
+        
+        // Gửi lệnh CLEAR_OTP xuống toolgsm
+        promises.push(db.ref(`commands/${CLIENT_SESSION_ID}_clear_${port.id}_${Date.now()}`).set({
+            portId: port.id,
+            machineId: port.machineId,
+            type: 'system',
+            recipient: 'SYSTEM',
+            content: 'CLEAR_OTP',
+            status: 'queued',
+            createdAt: { '.sv': 'timestamp' }
+        }));
+        
         if (port.otp) port.otp = null;
         port.smsSent = false;
         port.commandId = null;
@@ -2383,12 +2502,21 @@ function renderAdminUsers() {
         }
         
         if (u.role !== 'admin' && !isDeleted) {
-            statusHtml += `<div style="margin-top: 6px; display: flex; align-items: center; justify-content: flex-start;">
-                <label class="switch" style="transform: scale(0.7); transform-origin: left center; margin: 0;">
-                    <input type="checkbox" onchange="toggleToolGsm('${uid}', this.checked)" ${u.allowGsmTool ? 'checked' : ''}>
-                    <span class="slider round"></span>
-                </label>
-                <span style="font-size:10px; font-weight: 600; color:var(--text-muted); margin-left: -6px;">Tool GSM</span>
+            statusHtml += `<div style="margin-top: 6px; display: flex; flex-direction: column; gap: 4px;">
+                <div style="display: flex; align-items: center; justify-content: flex-start;">
+                    <label class="switch" style="transform: scale(0.7); transform-origin: left center; margin: 0;">
+                        <input type="checkbox" onchange="toggleToolGsm('${uid}', this.checked)" ${u.allowGsmTool ? 'checked' : ''}>
+                        <span class="slider round"></span>
+                    </label>
+                    <span style="font-size:10px; font-weight: 600; color:var(--text-muted); margin-left: -6px;">Tool GSM</span>
+                </div>
+                <div style="display: flex; align-items: center; justify-content: flex-start;">
+                    <label class="switch" style="transform: scale(0.7); transform-origin: left center; margin: 0;">
+                        <input type="checkbox" onchange="toggleUserExpired('${uid}', this.checked)" ${isExpired ? 'checked' : ''}>
+                        <span class="slider round"></span>
+                    </label>
+                    <span style="font-size:10px; font-weight: 600; color:var(--text-muted); margin-left: -6px;">Khóa (Hết hạn)</span>
+                </div>
             </div>`;
         }
 
@@ -2437,6 +2565,30 @@ window.toggleToolGsm = async function(uid, isEnabled) {
             timestamp: firebase.database.ServerValue.TIMESTAMP
         });
         showToast(`Đã ${isEnabled ? 'Bật' : 'Tắt'} quyền đẩy tool GSM cho khách hàng này.`, 'success');
+    } catch (e) {
+        console.error(e);
+        showToast('Lỗi thay đổi thiết lập: ' + e.message, 'error');
+        renderAdminUsers(); // revert UI
+    }
+}
+
+window.toggleUserExpired = async function(uid, isExpired) {
+    if (isImpersonating) return showToast('Không thể thay đổi thiết lập trong chế độ xem (Impersonate)', 'error');
+    if (!currentUserProfile || currentUserProfile.role !== 'admin') return;
+    
+    try {
+        await db.ref(`users/${uid}/limits/isExpired`).set(isExpired);
+        
+        // Ghi log
+        const u = adminUsersData[uid];
+        await db.ref('admin_logs').push({
+            action: 'UPDATE_CONFIG',
+            targetUid: uid,
+            adminEmail: currentUserProfile.email,
+            details: `Thay đổi trạng thái Hết Hạn cho [${u?.email || uid}]: ${isExpired ? 'Bật (Hết Hạn)' : 'Tắt'}`,
+            timestamp: firebase.database.ServerValue.TIMESTAMP
+        });
+        showToast(`Đã ${isExpired ? 'Bật Hết hạn' : 'Tắt Hết hạn'} cho khách hàng này.`, 'success');
     } catch (e) {
         console.error(e);
         showToast('Lỗi thay đổi thiết lập: ' + e.message, 'error');
@@ -2551,6 +2703,9 @@ window.openEditUserModal = function(uid) {
     } else {
         document.getElementById('edit-user-expiredate').value = '';
     }
+    
+    const isExpiredCheck = document.getElementById('edit-user-is-expired');
+    if (isExpiredCheck) isExpiredCheck.checked = u.limits?.isExpired === true;
 
     document.getElementById('edit-user-price').value = u.internalNotes?.price || '';
     document.getElementById('edit-user-source').value = u.internalNotes?.source || '';
@@ -2580,6 +2735,7 @@ window.adminSaveUserConfig = async function() {
     const dailyLimit = parseInt(document.getElementById('edit-user-dailylimit').value) || 0;
     const expireDateStr = document.getElementById('edit-user-expiredate').value;
     const expireAt = expireDateStr ? new Date(expireDateStr).getTime() : 0;
+    const isExpired = document.getElementById('edit-user-is-expired')?.checked || false;
     
     const price = document.getElementById('edit-user-price').value.trim();
     const source = document.getElementById('edit-user-source').value.trim();
@@ -2588,7 +2744,7 @@ window.adminSaveUserConfig = async function() {
     const issues = document.getElementById('edit-user-issues').value.trim();
 
     try {
-        await db.ref(`users/${uid}/limits`).set({ dailyLimit, expireAt });
+        await db.ref(`users/${uid}/limits`).set({ dailyLimit, expireAt, isExpired });
         await db.ref(`users/${uid}/internalNotes`).set({ price, source, tags, notes, issues });
         
         await db.ref('admin_logs').push({
@@ -2730,6 +2886,14 @@ auth.onAuthStateChanged(async (user) => {
                     auth.signOut();
                     return;
                 }
+
+                // Check Expiration
+                const limits = currentUserProfile.limits;
+                if (limits && limits.expireAt > 0 && limits.expireAt < Date.now()) {
+                    await showConfirm('Tài khoản của bạn đã hết hạn. Vui lòng liên hệ Admin.');
+                    auth.signOut();
+                    return;
+                }
             } else {
                 // P1: Chặn không tự động tạo profile. Yêu cầu Admin cấp quyền.
                 showToast('Tài khoản của bạn chưa được cấp phép truy cập. Vui lòng liên hệ Admin.', 'error');
@@ -2835,6 +2999,16 @@ function initializeAppFlow() {
             });
         });
     }
+
+    db.ref('global_hidden_numbers').on('value', (snapshot) => {
+        const val = snapshot.val();
+        if (val && Array.isArray(val)) {
+            globalAdminHiddenNumbers = val;
+        } else {
+            globalAdminHiddenNumbers = [];
+        }
+        if (typeof renderPorts === 'function') renderPorts();
+    });
 
     // Load history từ Firebase và kết hợp với local
     const renderHistorySafe = () => {
@@ -3138,6 +3312,7 @@ window.firefoxCheckBalance = async function () {
 
 window.firefoxGetPhone = async function () {
     if (isImpersonating) return showToast('Bạn đang ở chế độ Chỉ Đọc', 'error');
+    if (!checkUserLimits()) return;
     const config = getFirefoxConfig();
     if (!config.serviceId) {
         showToast('Vui lòng nhập Service ID!', 'error');
@@ -3258,6 +3433,7 @@ window.firefoxAddBlack = async function (pkey) {
 }
 
 window.firefoxSetAgain = async function (pkey) {
+    if (!checkUserLimits()) return;
     if (!(await showConfirm('Dùng lại số (Reuse) sẽ bị tính phí thêm một lần nữa. Bạn có chắc chắn muốn dùng lại số này không?'))) return;
 
     showToast('Đang yêu cầu dùng lại số...');
@@ -3556,22 +3732,54 @@ window.renderFirefoxPorts = function () {
     const container = document.getElementById('firefox-container');
     if (!container) return;
 
-    container.innerHTML = '';
-
     if (state.firefoxPorts.length === 0) {
         container.innerHTML = `<div style="padding: 40px; text-align: center; color: var(--text-muted);">Không có số nào đang thuê.</div>`;
         return;
     }
 
+    // Xóa thông báo trống nếu có
+    if (container.firstElementChild && !container.firstElementChild.classList.contains('grid-row')) {
+        container.innerHTML = '';
+    }
+
+    const activeRowIds = new Set(state.firefoxPorts.map(p => `ff-row-${p.pkey}`));
+
+    Array.from(container.children).forEach(child => {
+        if (child.classList.contains('grid-row')) {
+            if (!activeRowIds.has(child.id)) {
+                child.remove();
+            }
+        }
+    });
+
+    let currentDOMElement = container.firstElementChild;
     const now = Date.now();
 
     state.firefoxPorts.forEach(port => {
-        const row = document.createElement('div');
-        row.className = 'grid-row';
+        const rowId = `ff-row-${port.pkey}`;
+        let row = document.getElementById(rowId);
+
+        if (!row) {
+            row = document.createElement('div');
+            row.className = 'grid-row';
+            row.id = rowId;
+            container.insertBefore(row, currentDOMElement);
+        } else {
+            if (currentDOMElement !== row) {
+                container.insertBefore(row, currentDOMElement);
+            }
+        }
+
         if (port.status === 'waiting') {
             row.classList.add('row-highlight-warning');
-        } else if (port.status === 'releasing_failed') {
+        } else {
+            row.classList.remove('row-highlight-warning');
+        }
+
+        if (port.status === 'releasing_failed') {
             row.style.background = 'rgba(231, 76, 60, 0.1)';
+        } else {
+            row.style.background = '';
         }
 
         let uiStatus = 'waiting';
@@ -3663,7 +3871,7 @@ window.renderFirefoxPorts = function () {
             `;
         }
 
-        row.innerHTML = `
+        const innerHTMLString = `
             <div class="col-status" style="width: 80px;">${statusDot}</div>
             <div class="col-phone" style="width: 150px;">${escapeHtml(normalizePhoneNumber(port.phone))}</div>
             <div class="col-otp" style="flex: 1;">${otpContent}</div>
@@ -3673,7 +3881,20 @@ window.renderFirefoxPorts = function () {
             </div>
         `;
 
-        container.appendChild(row);
+        const contentHash = `${port.status}_${port.otp}_${port.lastError}_${port.lastReply}_${port.smsContent}_${port.phone}`;
+        
+        if (row.getAttribute('data-content-hash') !== contentHash) {
+            row.innerHTML = innerHTMLString;
+            row.setAttribute('data-content-hash', contentHash);
+        } else {
+            // Chỉ cập nhật text của timer nếu các nội dung khác không đổi
+            const timeEl = row.querySelector('.col-time');
+            if (timeEl && timeEl.innerHTML !== timeText) {
+                timeEl.innerHTML = timeText;
+            }
+        }
+
+        currentDOMElement = row.nextElementSibling;
     });
 
     if (window.lucide) {
@@ -4030,15 +4251,23 @@ function renderAdminDashboardStats(tenantsData) {
     
     const topUsersList = document.getElementById('dash-admin-top-users');
     topUsersList.innerHTML = '';
-    userUsages.sort((a, b) => b.today !== a.today ? b.today - a.today : b.total - a.total).slice(0, 10).forEach(u => {
-        const row = document.createElement('div');
-        row.className = 'grid-row';
-        row.style.display = 'grid';
-        row.style.gridTemplateColumns = '1fr 80px 80px';
-        const todayColor = u.today > 0 ? 'var(--success)' : 'var(--text-muted)';
-        row.innerHTML = `<div>${escapeHtml(u.email)}</div><div style="font-weight: 600; color: ${todayColor};">${u.today}</div><div style="color: var(--text-muted);">${u.total}</div>`;
-        topUsersList.appendChild(row);
-    });
+    
+    // Filter only users who used today, then sort
+    const topTodayUsers = userUsages.filter(u => u.today > 0).sort((a, b) => b.today - a.today);
+    
+    if (topTodayUsers.length === 0) {
+        topUsersList.innerHTML = '<div style="padding: 16px; text-align: center; color: var(--text-muted); font-style: italic;">Chưa có khách hàng nào dùng hôm nay</div>';
+    } else {
+        topTodayUsers.slice(0, 10).forEach(u => {
+            const row = document.createElement('div');
+            row.className = 'grid-row';
+            row.style.display = 'grid';
+            row.style.gridTemplateColumns = '1fr 80px 80px';
+            const todayColor = 'var(--success)'; // Since it's > 0
+            row.innerHTML = `<div>${escapeHtml(u.email)}</div><div style="font-weight: 600; color: ${todayColor}; text-align: center;">${u.today}</div><div style="color: var(--text-muted); text-align: center;">${u.total}</div>`;
+            topUsersList.appendChild(row);
+        });
+    }
 }
 
 function processDashboardMetrics(historyData, tenantTarget) {
