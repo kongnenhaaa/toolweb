@@ -11,7 +11,6 @@ let serverTimeOffset = 0;
 let globalWebStates = {};
 let globalWebStateRefs = {};
 let pendingBalanceChecks = new Set();
-let autoHistoryTimeouts = {};
 let commandResults = {};
 let appliedCommandResults = {};
 let sendingSmsPorts = new Set();
@@ -32,7 +31,7 @@ const BALANCE_WAIT_TIMEOUT_MS = 45000;
 const COMMAND_STALE_TIMEOUT_MS = 10 * 60 * 1000;
 const BALANCE_COMMAND_SPACING_MS = 1200;
 const COMMAND_IN_FLIGHT_STATUSES = new Set(['queued', 'running']);
-const COMMAND_SUCCESS_STATUSES = new Set(['sent', 'done', 'success', 'maybe_sent']);
+const COMMAND_SUCCESS_STATUSES = new Set(['sent', 'done', 'success', 'maybe_sent', 'otp_received']);
 const COMMAND_FAILED_STATUSES = new Set(['failed', 'timeout', 'error']);
 const CLIENT_SESSION_ID = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
@@ -423,6 +422,7 @@ function getCommandStatusText(status, type = 'sms') {
     if (status === 'queued') return 'Đang xếp hàng';
     if (status === 'running') return type === 'balance' ? 'Đang kiểm tra số dư' : 'Đang gửi SMS';
     if (status === 'sent') return 'Đã gửi SMS';
+    if (status === 'otp_received') return 'Đã nhận OTP';
     if (status === 'maybe_sent') return 'Có thể đã gửi';
     if (status === 'done' || status === 'success') return type === 'balance' ? 'Đã kiểm tra số dư' : 'Hoàn tất';
     if (status === 'failed') return 'Lỗi';
@@ -452,8 +452,7 @@ async function reservePortCommand({ machineId, portId, commandId, type = 'sms', 
     const stateRef = db.ref(`web_states/machines/${machineId}/ports/${portId}`);
     const result = await stateRef.transaction(current => {
         current = current || {};
-        if (COMMAND_IN_FLIGHT_STATUSES.has(current.commandStatus)) return;
-        if (type === 'sms' && current.smsSent && !isActionableSmsError(current.errorMsg)) return;
+        // Mọi lần bấm gửi đều tạo một request mới; trạng thái cũ không chặn request.
 
         return {
             ...current,
@@ -584,6 +583,10 @@ async function applyCommandResult(commandId, result) {
             commandId,
             commandStatus: status
         };
+        if (status === 'otp_received') {
+            updatePayload.smsSent = false;
+            updatePayload.otp = result.otp || null;
+        }
         if (type !== 'sms') {
             updatePayload.commandStatus = null;
         }
@@ -595,6 +598,11 @@ async function applyCommandResult(commandId, result) {
         if (!didUpdate) return false;
         if (port) {
             port.errorMsg = isActionableSmsError(currentError) ? normalizeSmsError(currentError) : null;
+            if (status === 'otp_received' && result.otp) {
+                port.otp = String(result.otp);
+                port.smsSent = false;
+                port.smsSentTime = null;
+            }
             if (type !== 'sms') {
                 port.commandStatus = null;
             }
@@ -605,24 +613,6 @@ async function applyCommandResult(commandId, result) {
     return true;
 }
 
-
-function scheduleAutoHistory(portId, machineId) {
-    if (currentUserProfile && currentUserProfile.role !== 'admin' && currentUserProfile.allowGsmTool === false) return;
-    // Dùng key kết hợp portId và machineId để tránh xung đột
-    const timeoutKey = `${machineId}_${portId}`;
-    if (autoHistoryTimeouts[timeoutKey]) {
-        clearTimeout(autoHistoryTimeouts[timeoutKey]);
-    }
-
-    // Tự động chuyển qua lịch sử sau 20 giây
-    autoHistoryTimeouts[timeoutKey] = setTimeout(() => {
-        const port = state.ports.find(p => p.id === portId && p.machineId === machineId);
-        // Chỉ tự động chuyển nếu cổng chưa bị ẩn (tránh bị push trùng từ nhiều máy khách cùng lúc)
-        if (port && !port.hidden) {
-            markAsUsed(portId, machineId);
-        }
-    }, 20000);
-}
 
 // Âm thanh thông báo OTP (Web Audio API - không cần file ngoài)
 function playNotificationSound() {
@@ -736,7 +726,6 @@ function fetchPorts() {
             }
 
             if (newPort.otp) {
-                scheduleAutoHistory(newPort.id, newPort.machineId);
                 // Chỉ thông báo nếu không phải lần tải dữ liệu đầu tiên khi vừa mở/refresh trang web
                 if (!isInitialFirebaseLoad && (!existingPort || existingPort.otp !== newPort.otp)) {
                     // Có thể thêm âm thanh ở đây nếu cần
@@ -793,6 +782,12 @@ function applyWebStates() {
         let errorMsg = webState.errorMsg ? normalizeSmsError(webState.errorMsg) : null;
         const smsSentTime = webState.smsSentTime || port.smsSentTime || null;
         const activeCommandId = webState.commandId || port.commandId || null;
+
+        // OTP gần nhất được giữ trong web_states để vẫn hiện sau refresh trình duyệt
+        // hoặc sau khi ToolGSM khởi động lại. OTP mới từ GSM sẽ thay thế giá trị này.
+        if (!port.otp && webState.otp) {
+            port.otp = String(webState.otp);
+        }
 
         if (isSmsSent && smsSentTime && !port.otp && !webState.errorMsg) {
             const elapsed = getServerNow() - smsSentTime;
@@ -1458,23 +1453,8 @@ async function executeSendSms() {
         return;
     }
 
-    if (!actionPort.isTest && actionPort.status !== 'online') {
-        showToast('Cổng này đang offline, không thể gửi SMS.', 'error');
-        return;
-    }
-
     if (sendingSmsPorts.has(actionKey)) {
         showToast('Lệnh gửi SMS đang được tạo, vui lòng đợi.', 'error');
-        return;
-    }
-
-    if (COMMAND_IN_FLIGHT_STATUSES.has(webState.commandStatus)) {
-        showToast('Cổng này đang xử lý lệnh trước đó.', 'error');
-        return;
-    }
-
-    if (actionPort && actionPort.smsSent && !isActionableSmsError(actionPort.errorMsg)) {
-        showToast('Cổng này đang chờ OTP, hãy hủy chờ OTP trước khi gửi lại.', 'error');
         return;
     }
 
@@ -1546,18 +1526,15 @@ async function executeSendSms() {
         const port = state.ports.find(p => p.id === actionPortId && p.machineId === actionMachineId);
         if (port && !port.isTest) {
             // Xoá OTP cũ hiển thị trên trình duyệt để chuyển sang trạng thái "Đang chờ mã..."
-            port.otp = null;
             port.errorMsg = null;
             port.commandId = commandId;
             port.commandIds = null;
             port.commandStatus = 'queued';
 
             await Promise.all([
-                db.ref(`machines/${actionMachineId}/ports/${actionPortId}/otp`).remove(),
                 db.ref(`web_states/machines/${actionMachineId}/ports/${actionPortId}`).update({ errorMsg: null })
             ]);
         } else if (port) {
-            port.otp = null;
             port.smsSent = true;
             renderPorts();
         }
@@ -1847,11 +1824,6 @@ window.refreshAllPorts = function () {
 async function markAsUsed(portId, machineId) {
     if (isImpersonating) return showToast('Bạn đang ở chế độ Chỉ Đọc', 'error');
     if (currentUserProfile && currentUserProfile.role !== 'admin' && currentUserProfile.allowGsmTool === false) return;
-    const timeoutKey = `${machineId}_${portId}`;
-    if (autoHistoryTimeouts[timeoutKey]) {
-        clearTimeout(autoHistoryTimeouts[timeoutKey]);
-        delete autoHistoryTimeouts[timeoutKey];
-    }
     const portIndex = state.ports.findIndex(p => p.id === portId && p.machineId === machineId);
     if (portIndex > -1) {
         const port = state.ports[portIndex];
@@ -1946,7 +1918,6 @@ function simulateOtpArrival(portId, machineId, isZalo = false) {
         const port = state.ports.find(p => p.id === portId && p.machineId === machineId);
         if (port && !port.hidden) {
             port.otp = isZalo ? Math.floor(1000 + Math.random() * 9000).toString() : Math.floor(100000 + Math.random() * 900000).toString();
-            scheduleAutoHistory(portId, machineId);
             renderPorts();
             // OTP mới vẫn hiển thị trên bảng, không hiện toast/âm thanh.
         }
@@ -3159,6 +3130,30 @@ window.onclick = function (event) {
 
 function getFfConfigKey() { return tenantStorageKey('firefox_api_config'); }
 function getFfPortsKey() { return tenantStorageKey('firefox_api_ports'); }
+const FIREFOX_OTP_WAIT_TIMEOUT_MS = 3 * 60 * 1000;
+
+function markFirefoxOtpTimedOut(port) {
+    if (!port || port.status === 'otp_timeout') return;
+
+    port.status = 'otp_timeout';
+    port.timedOutAt = Date.now();
+    port.lastError = 'Quá 3 phút chưa nhận được OTP';
+    port.lastStatus = 'Đã hết thời gian chờ OTP';
+    saveFirefoxPorts();
+    showToast(`Số ${port.phone} quá 3 phút chưa nhận được OTP`, 'error');
+
+    // Release upstream in the background, but keep the row so the timeout remains visible.
+    callFirefoxApi({ act: 'setRel', pkey: port.pkey }).then(res => {
+        port.releaseResult = res || null;
+        port.lastStatus = res && res.startsWith('1|')
+            ? 'Đã tự động huỷ số sau khi hết thời gian chờ'
+            : `Hết thời gian chờ; kết quả tự động huỷ: ${res || 'Không phản hồi'}`;
+        saveFirefoxPorts();
+    }).catch(error => {
+        port.lastStatus = `Hết thời gian chờ; tự động huỷ lỗi: ${error.message}`;
+        saveFirefoxPorts();
+    });
+}
 
 function loadFirefoxConfig() {
     try {
@@ -3177,48 +3172,17 @@ function loadFirefoxConfig() {
 
         state.firefoxPorts = JSON.parse(localStorage.getItem(getFfPortsKey()) || '[]');
 
-        // Clean up expired ports on load
+        // Restore old sessions with the same three-minute OTP wait limit.
         const now = Date.now();
         state.firefoxPorts.forEach(p => {
-            if (p.status === 'waiting' && p.expireTime <= now) {
-                p.status = 'releasing';
-                callFirefoxApi({ act: 'setRel', pkey: p.pkey }).then(res => {
-                    if (res && res.startsWith('1|')) {
-                        state.firefoxPorts = state.firefoxPorts.filter(px => px.pkey !== p.pkey);
-                        saveFirefoxPorts();
-                    } else if (res && res.startsWith('0|')) {
-                        const errCode = res.split('|')[1];
-                        if (!isNaN(errCode) && parseInt(errCode) > 0) {
-                            const fp = state.firefoxPorts.find(px => px.pkey === p.pkey);
-                            if (fp) {
-                                fp.status = 'waiting';
-                                fp.expireTime = Date.now() + (parseInt(errCode) + 2) * 1000;
-                                saveFirefoxPorts();
-                            }
-                        } else {
-                            const fp = state.firefoxPorts.find(px => px.pkey === p.pkey);
-                            if (fp) {
-                                fp.status = 'releasing_failed';
-                                fp.lastError = res;
-                                saveFirefoxPorts();
-                            }
-                        }
-                    } else {
-                        const fp = state.firefoxPorts.find(px => px.pkey === p.pkey);
-                        if (fp) {
-                            fp.status = 'releasing_failed';
-                            fp.lastError = res;
-                            saveFirefoxPorts();
-                        }
-                    }
-                }).catch(e => {
-                    const fp = state.firefoxPorts.find(px => px.pkey === p.pkey);
-                    if (fp) {
-                        fp.status = 'releasing_failed';
-                        fp.lastError = e.message;
-                        saveFirefoxPorts();
-                    }
-                });
+            if (p.status === 'waiting' || p.status === 'waiting_receipt') {
+                const waitStartedAt = p.otpWaitStartedAt || p.startTime || now;
+                p.otpWaitStartedAt = waitStartedAt;
+                p.expireTime = Math.min(
+                    Number(p.expireTime) || (waitStartedAt + FIREFOX_OTP_WAIT_TIMEOUT_MS),
+                    waitStartedAt + FIREFOX_OTP_WAIT_TIMEOUT_MS
+                );
+                if (p.expireTime <= now) markFirefoxOtpTimedOut(p);
             }
         });
         saveFirefoxPorts();
@@ -3257,7 +3221,7 @@ function getFirefoxConfig() {
     };
 }
 
-async function callFirefoxApi(params) {
+async function callFirefoxApi(params, timeoutMs = 8000) {
     const config = getFirefoxConfig();
     const baseUrl = config.baseUrl || '/api/firefox';
     if (!config.token && params.act !== 'getItem') {
@@ -3269,22 +3233,32 @@ async function callFirefoxApi(params) {
         params.token = config.token;
     }
 
+    const requestParams = { ...params, _ts: Date.now() };
     let urlStr = baseUrl;
     if (urlStr.includes('?')) {
-        urlStr += '&' + new URLSearchParams(params).toString();
+        urlStr += '&' + new URLSearchParams(requestParams).toString();
     } else {
-        urlStr += '?' + new URLSearchParams(params).toString();
+        urlStr += '?' + new URLSearchParams(requestParams).toString();
     }
 
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
     try {
         const response = await fetch(urlStr, {
             method: 'GET',
+            cache: 'no-store',
+            signal: controller.signal,
         });
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
         const text = await response.text();
         return text;
     } catch (e) {
         showToast(`Lỗi gọi API: ${e.message}`, 'error');
         return null;
+    } finally {
+        clearTimeout(timeoutId);
     }
 }
 
@@ -3337,12 +3311,14 @@ window.firefoxGetPhone = async function () {
                 phone: mobile,
                 status: 'waiting',
                 startTime: Date.now(),
-                expireTime: Date.now() + 5 * 60 * 1000, // 5 phút timeout (mặc định)
+                otpWaitStartedAt: Date.now(),
+                expireTime: Date.now() + FIREFOX_OTP_WAIT_TIMEOUT_MS,
                 otp: null,
                 smsContent: null
             });
             saveFirefoxPorts();
             showToast(`Thuê số thành công: ${mobile}`);
+            setTimeout(pollFirefoxOtps, 0);
         } else if (parts[0] === '0') {
             const errCode = parts[1];
             let errorMsg = `Lỗi thuê số (Mã ${errCode})`;
@@ -3442,9 +3418,12 @@ window.firefoxSetAgain = async function (pkey) {
         const port = state.firefoxPorts.find(p => p.pkey === pkey);
         if (port) {
             port.status = 'waiting';
-            port.expireTime = Date.now() + 5 * 60 * 1000;
+            port.otpWaitStartedAt = Date.now();
+            port.expireTime = port.otpWaitStartedAt + FIREFOX_OTP_WAIT_TIMEOUT_MS;
             port.otp = '';
             port.smsContent = '';
+            port.lastError = '';
+            port.timedOutAt = null;
             saveFirefoxPorts();
             showToast('Đã chuyển số về trạng thái Đang chờ để nhận OTP tiếp theo!');
         }
@@ -3523,51 +3502,20 @@ async function pollFirefoxOtps() {
         let hasChanges = false;
         const now = Date.now();
 
-        for (let i = 0; i < state.firefoxPorts.length; i++) {
-            const port = state.firefoxPorts[i];
+        // Poll several numbers concurrently, but cap concurrency to protect the upstream API.
+        const portsToPoll = [...state.firefoxPorts];
+        let nextPortIndex = 0;
+        const workerCount = Math.min(8, portsToPoll.length);
+        const pollWorker = async () => {
+            while (true) {
+                const i = nextPortIndex++;
+                if (i >= portsToPoll.length) return;
+                const port = portsToPoll[i];
 
-            // Tự động Release nếu quá hạn
-            if ((port.status === 'waiting' || port.status === 'waiting_receipt') && now > port.expireTime) {
-                port.status = 'releasing';
+            // Only report an OTP timeout after the full three-minute wait.
+            if ((port.status === 'waiting' || port.status === 'waiting_receipt') && now >= port.expireTime) {
+                markFirefoxOtpTimedOut(port);
                 hasChanges = true;
-
-                callFirefoxApi({ act: 'setRel', pkey: port.pkey }).then(res => {
-                    if (res && res.startsWith('1|')) {
-                        state.firefoxPorts = state.firefoxPorts.filter(p => p.pkey !== port.pkey);
-                        saveFirefoxPorts();
-                    } else if (res && res.startsWith('0|')) {
-                        const errCode = res.split('|')[1];
-                        if (!isNaN(errCode) && parseInt(errCode) > 0) {
-                            const fp = state.firefoxPorts.find(p => p.pkey === port.pkey);
-                            if (fp) {
-                                fp.status = 'waiting';
-                                fp.expireTime = Date.now() + (parseInt(errCode) + 2) * 1000;
-                                saveFirefoxPorts();
-                            }
-                        } else {
-                            const fp = state.firefoxPorts.find(p => p.pkey === port.pkey);
-                            if (fp) {
-                                fp.status = 'releasing_failed';
-                                fp.lastError = res;
-                                saveFirefoxPorts();
-                            }
-                        }
-                    } else {
-                        const fp = state.firefoxPorts.find(p => p.pkey === port.pkey);
-                        if (fp) {
-                            fp.status = 'releasing_failed';
-                            fp.lastError = res;
-                            saveFirefoxPorts();
-                        }
-                    }
-                }).catch(e => {
-                    const fp = state.firefoxPorts.find(p => p.pkey === port.pkey);
-                    if (fp) {
-                        fp.status = 'releasing_failed';
-                        fp.lastError = e.message;
-                        saveFirefoxPorts();
-                    }
-                });
                 continue;
             }
 
@@ -3611,9 +3559,13 @@ async function pollFirefoxOtps() {
                                             port.pkey = newPkey;
                                             port.status = 'waiting';
                                             port.lastStatus = 'Đã lấy lại số, đang chờ OTP';
-                                            port.expireTime = Date.now() + 5 * 60 * 1000;
+                                            port.otpWaitStartedAt = Date.now();
+                                            port.expireTime = port.otpWaitStartedAt + FIREFOX_OTP_WAIT_TIMEOUT_MS;
+                                            port.lastError = '';
+                                            port.timedOutAt = null;
                                             saveFirefoxPorts();
                                             showToast('Đã lấy lại số thành công. Đang chờ OTP...');
+                                            setTimeout(pollFirefoxOtps, 0);
                                         }
                                     } else {
                                         port.lastStatus = `Lỗi lấy lại số: ${reuseRes}`;
@@ -3635,11 +3587,16 @@ async function pollFirefoxOtps() {
                             port.smsContent = port.lastReply;
                             if (!port.otpReceivedAt) port.otpReceivedAt = Date.now();
 
-                            // Lưu vào History
-                            try {
-                                const historyKey = `FIREFOX_${port.pkey}_${Date.now()}`;
-                                const historyRef = db.ref(tenantPath(`history/${historyKey}`));
-                                await historyRef.set({
+                            // Show the OTP immediately; persist history in the background.
+                            hasChanges = true;
+                            saveFirefoxPorts();
+                            renderFirefoxPorts();
+                            playNotificationSound();
+                            showToast(`Có OTP mới cho số ${port.phone}: ${port.otp}`);
+
+                            const historyKey = `FIREFOX_${port.pkey}_${Date.now()}`;
+                            const historyRef = db.ref(tenantPath(`history/${historyKey}`));
+                            historyRef.set({
                                     id: `FF_${port.pkey.slice(0, 5)}`,
                                     machineId: 'FIREFOX_API',
                                     phone: port.phone,
@@ -3649,15 +3606,10 @@ async function pollFirefoxOtps() {
                                     customerId: getTenantId(),
                                     source: 'firefox',
                                     status: 'success'
-                                });
-                            } catch (err) {
+                                }).catch(err => {
                                 console.error('Lỗi lưu Firebase:', err);
                                 showToast(`Lỗi lưu lịch sử OTP lên hệ thống: ${err.message}`, 'error');
-                            }
-
-                            hasChanges = true;
-                            playNotificationSound();
-                            showToast(`Có OTP mới cho số ${port.phone}: ${port.otp}`);
+                                });
                         } else {
                             port.lastStatus = `Phản hồi chưa có OTP: ${code}`;
                             port.smsContent = smsText;
@@ -3668,7 +3620,7 @@ async function pollFirefoxOtps() {
                         const errCode = parts[1];
 
                         if (errCode === '-3') {
-                            port.lastStatus = 'Chưa nhận được SMS/OTP, sẽ kiểm tra lại sau 5 giây';
+                            port.lastStatus = 'Chưa nhận được SMS/OTP, sẽ kiểm tra lại sau 1 giây';
                             port.lastReply = 'Đang chờ verification code';
                             port.lastReplyAt = Date.now();
                             hasChanges = true;
@@ -3709,6 +3661,9 @@ async function pollFirefoxOtps() {
                 }
             }
         }
+        };
+
+        await Promise.all(Array.from({ length: workerCount }, () => pollWorker()));
 
         if (hasChanges) {
             saveFirefoxPorts();
@@ -3726,7 +3681,7 @@ setInterval(() => {
     }
 }, 1000);
 
-setInterval(pollFirefoxOtps, 5000);
+setInterval(pollFirefoxOtps, 750);
 
 window.renderFirefoxPorts = function () {
     const container = document.getElementById('firefox-container');
@@ -3770,13 +3725,15 @@ window.renderFirefoxPorts = function () {
             }
         }
 
-        if (port.status === 'waiting') {
+        const isWaiting = port.status === 'waiting' || port.status === 'waiting_receipt';
+
+        if (isWaiting) {
             row.classList.add('row-highlight-warning');
         } else {
             row.classList.remove('row-highlight-warning');
         }
 
-        if (port.status === 'releasing_failed') {
+        if (port.status === 'releasing_failed' || port.status === 'otp_timeout') {
             row.style.background = 'rgba(231, 76, 60, 0.1)';
         } else {
             row.style.background = '';
@@ -3794,12 +3751,15 @@ window.renderFirefoxPorts = function () {
         } else if (port.status === 'releasing_failed') {
             uiStatus = 'error';
             statusLabel = 'Huỷ lỗi';
+        } else if (port.status === 'otp_timeout') {
+            uiStatus = 'error';
+            statusLabel = 'Quá 3 phút';
         }
 
         const statusDot = `<span class="status-pill ${uiStatus}">${escapeHtml(statusLabel)}</span>`;
 
         let timeText = '--';
-        if (port.status === 'waiting' || port.status === 'releasing') {
+        if (isWaiting || port.status === 'releasing') {
             const timeLeft = Math.max(0, Math.floor((port.expireTime - now) / 1000));
             if (timeLeft <= 60) {
                 timeText = `${timeLeft}s`;
@@ -3809,10 +3769,12 @@ window.renderFirefoxPorts = function () {
         } else if (port.status === 'otp' && port.otpReceivedAt) {
             const dt = new Date(port.otpReceivedAt);
             timeText = `${dt.getHours().toString().padStart(2, '0')}:${dt.getMinutes().toString().padStart(2, '0')}:${dt.getSeconds().toString().padStart(2, '0')}`;
+        } else if (port.status === 'otp_timeout') {
+            timeText = '3m 00s';
         }
 
         let otpContent = '';
-        if (port.status === 'waiting' || port.status === 'releasing') {
+        if (isWaiting || port.status === 'releasing') {
             otpContent = `<span style="color: #f39c12">Đang chờ mã...</span>`;
             if (port.lastReply) {
                 otpContent += `<br><span style="font-size:11px;color:var(--text-muted);">Phản hồi: ${escapeHtml(port.lastReply)}</span>`;
@@ -3822,12 +3784,17 @@ window.renderFirefoxPorts = function () {
             if (port.lastReply) {
                 otpContent += `<br><span style="font-size:11px;color:var(--text-muted);">Phản hồi: ${escapeHtml(port.lastReply)}</span>`;
             }
+        } else if (port.status === 'otp_timeout') {
+            otpContent = `<span style="color: #e74c3c; font-weight: 600;">${escapeHtml(port.lastError)}</span>`;
+            if (port.lastStatus) {
+                otpContent += `<br><span style="font-size:11px;color:var(--text-muted);">${escapeHtml(port.lastStatus)}</span>`;
+            }
         } else {
             otpContent = `<span class="otp-badge">${escapeHtml(port.otp)}</span> <br><span style="font-size:11px;color:gray;">${escapeHtml(port.smsContent)}</span>`;
         }
 
         let actionButtons = '';
-        if (port.status === 'waiting') {
+        if (isWaiting) {
             actionButtons = `
                     <button class="btn btn-primary" onclick="firefoxOpenSmsModal('${port.pkey}', '${port.phone}')" title="Gửi SMS đi">
                         <i data-lucide="send"></i> Gửi SMS
@@ -3869,6 +3836,15 @@ window.renderFirefoxPorts = function () {
                         <i data-lucide="x"></i> Bỏ qua
                     </button>
             `;
+        } else if (port.status === 'otp_timeout') {
+            actionButtons = `
+                    <button class="btn btn-outline" onclick="firefoxAddBlack('${port.pkey}')" title="Blacklist nếu số không nhận được OTP">
+                        <i data-lucide="slash"></i> Báo lỗi
+                    </button>
+                    <button class="btn btn-outline" onclick="firefoxClosePort('${port.pkey}')" title="Đóng số">
+                        <i data-lucide="x"></i> Đóng
+                    </button>
+            `;
         }
 
         const innerHTMLString = `
@@ -3881,7 +3857,7 @@ window.renderFirefoxPorts = function () {
             </div>
         `;
 
-        const contentHash = `${port.status}_${port.otp}_${port.lastError}_${port.lastReply}_${port.smsContent}_${port.phone}`;
+        const contentHash = `${port.status}_${port.otp}_${port.lastError}_${port.lastStatus}_${port.lastReply}_${port.smsContent}_${port.phone}`;
         
         if (row.getAttribute('data-content-hash') !== contentHash) {
             row.innerHTML = innerHTMLString;
@@ -3964,7 +3940,12 @@ window.firefoxExecuteSendSms = async function () {
             port.status = 'waiting_receipt';
             port.lastStatus = 'Đang chờ biên lai gửi SMS...';
             port.lastReplyAt = Date.now();
+            port.otpWaitStartedAt = Date.now();
+            port.expireTime = port.otpWaitStartedAt + FIREFOX_OTP_WAIT_TIMEOUT_MS;
+            port.lastError = '';
+            port.timedOutAt = null;
             saveFirefoxPorts();
+            setTimeout(pollFirefoxOtps, 0);
         }
 
         closeModal('firefox-sms-modal');

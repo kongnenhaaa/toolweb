@@ -3,6 +3,7 @@ export default async function handler(req, res) {
     res.setHeader('Access-Control-Allow-Credentials', true);
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
     res.setHeader(
         'Access-Control-Allow-Headers',
         'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version'
@@ -24,14 +25,32 @@ export default async function handler(req, res) {
         // Đổi sang HTTPS để mã hoá đường truyền
         const targetUrl = `https://www.firefox.fun/yhapi.ashx?${urlParams.toString()}`;
 
-        // Fetch dữ liệu từ API gốc
-        const response = await fetch(targetUrl);
-        const data = await response.text();
+        // Bound upstream latency so one stuck request cannot delay OTP polling indefinitely.
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 10000);
+        let response;
+        let data;
+        try {
+            response = await fetch(targetUrl, {
+                signal: controller.signal,
+                cache: 'no-store',
+                headers: { Accept: 'text/plain' }
+            });
+            data = await response.text();
+        } finally {
+            clearTimeout(timeoutId);
+        }
+
+        if (!response.ok) {
+            res.status(response.status).send(data || `Firefox API HTTP ${response.status}`);
+            return;
+        }
 
         // Trả kết quả về cho Frontend
         res.status(200).send(data);
     } catch (error) {
         console.error('Vercel Proxy Error:', error);
-        res.status(500).json({ error: 'Failed to fetch from Firefox API' });
+        const status = error.name === 'AbortError' ? 504 : 500;
+        res.status(status).json({ error: error.name === 'AbortError' ? 'Firefox API timeout' : 'Failed to fetch from Firefox API' });
     }
 }
