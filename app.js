@@ -33,6 +33,10 @@ const BALANCE_COMMAND_SPACING_MS = 1200;
 const COMMAND_IN_FLIGHT_STATUSES = new Set(['queued', 'running']);
 const COMMAND_SUCCESS_STATUSES = new Set(['sent', 'done', 'success', 'maybe_sent', 'otp_received']);
 const COMMAND_FAILED_STATUSES = new Set(['failed', 'timeout', 'error']);
+const BLOCKED_MACHINE_IDS = new Set(['desktop-o8gddkr']);
+function isBlockedMachine(machineId) {
+    return BLOCKED_MACHINE_IDS.has(String(machineId || '').trim().toLowerCase());
+}
 const CLIENT_SESSION_ID = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
 let currentUserProfile = null;
@@ -431,17 +435,22 @@ function getCommandStatusText(status, type = 'sms') {
 }
 
 async function createCommand({ machineId, portId, recipient, content, type = 'sms', commandId = null }) {
+    if (isBlockedMachine(machineId)) throw new Error('Machine này đã bị chặn trên web.');
     const commandRef = commandId ? db.ref(`commands/${commandId}`) : db.ref('commands').push();
     commandId = commandId || commandRef.key;
+    const commandPort = state.ports.find(p => p.id === portId && p.machineId === machineId);
     await commandRef.set({
         id: commandId,
+        protocolVersion: 1,
         machineId,
         portId,
+        deviceName: commandPort?.deviceName || machineId,
         recipient,
         content,
         type,
         status: 'queued',
         clientSessionId: CLIENT_SESSION_ID,
+        requestSource: 'toolweb',
         createdAt: firebase.database.ServerValue.TIMESTAMP,
         updatedAt: firebase.database.ServerValue.TIMESTAMP
     });
@@ -449,9 +458,16 @@ async function createCommand({ machineId, portId, recipient, content, type = 'sm
 }
 
 async function reservePortCommand({ machineId, portId, commandId, type = 'sms', phone = 'NONE' }) {
+    if (isBlockedMachine(machineId)) return false;
     const stateRef = db.ref(`web_states/machines/${machineId}/ports/${portId}`);
     const result = await stateRef.transaction(current => {
         current = current || {};
+        const now = getServerNow();
+        const existingReservation = current.reservationId;
+        const reservationExpiresAt = Number(current.reservationExpiresAt || 0);
+        if (existingReservation && existingReservation !== commandId && reservationExpiresAt > now) return;
+        if (current.commandId && current.commandId !== commandId
+            && COMMAND_IN_FLIGHT_STATUSES.has(current.commandStatus)) return;
         // Mọi lần bấm gửi đều tạo một request mới; trạng thái cũ không chặn request.
 
         return {
@@ -464,7 +480,9 @@ async function reservePortCommand({ machineId, portId, commandId, type = 'sms', 
             errorMsg: null,
             phone: phone || current.phone || 'NONE',
             reservedBy: CLIENT_SESSION_ID,
+            reservationId: commandId,
             reservedAt: firebase.database.ServerValue.TIMESTAMP,
+            reservationExpiresAt: now + 480000,
             updatedAt: firebase.database.ServerValue.TIMESTAMP
         };
     }, undefined, false);
@@ -479,6 +497,10 @@ async function releasePortCommandReservation(machineId, portId, commandId, error
         commandIds: null,
         commandStatus: errorMsg ? 'failed' : null,
         errorMsg,
+        reservationId: null,
+        reservedBy: null,
+        reservedAt: null,
+        reservationExpiresAt: null,
         releasedAt: firebase.database.ServerValue.TIMESTAMP
     });
 }
@@ -535,16 +557,22 @@ async function updateCommandStateIfCurrent(machineId, portId, commandId, payload
 
 async function applyCommandResult(commandId, result) {
     if (!result || !result.machineId || !result.portId) return false;
+    if (isBlockedMachine(result.machineId)) return false;
     if (result.updatedAt && getServerNow() - result.updatedAt > 10 * 60 * 1000) return false;
 
     const stateKey = `${result.machineId}_${result.portId}`;
     const webState = globalWebStates[stateKey] || {};
     const webStateCommandIds = Array.isArray(webState.commandIds) ? webState.commandIds : [];
     const port = state.ports.find(p => p.id === result.portId && p.machineId === result.machineId);
-    const isOwnResult = webState.reservedBy === CLIENT_SESSION_ID || port?.commandId === commandId;
+    // Results may originate from this browser, Python, or another GSM worker.
+    // The exact machine+COM reservation is the ownership proof for all of them.
+    const isOwnResult = webState.reservedBy === CLIENT_SESSION_ID
+        || webState.reservationId === commandId
+        || port?.commandId === commandId;
     if (!isOwnResult) return false;
     if (webState.commandId && webState.commandId !== commandId && !webStateCommandIds.includes(commandId)) return false;
-    if (!webState.commandId && webStateCommandIds.length === 0 && port?.commandId !== commandId) return false;
+    if (!webState.commandId && webStateCommandIds.length === 0
+        && webState.reservationId !== commandId && port?.commandId !== commandId) return false;
 
     const status = result.status || 'unknown';
     const type = result.type || (result.recipient === 'USSD' ? 'balance' : 'sms');
@@ -690,6 +718,7 @@ function fetchPorts() {
         if (machinesData) {
             // Duyệt qua từng máy tính
             Object.keys(machinesData).forEach(machineId => {
+                if (isBlockedMachine(machineId)) return;
                 const machineNode = machinesData[machineId];
 
                 let lastSync = 0;
@@ -751,6 +780,7 @@ function fetchPorts() {
         let mergedRefs = {};
         if (statesData) {
             Object.keys(statesData).forEach(mId => {
+                if (isBlockedMachine(mId)) return;
                 if (statesData[mId].ports) {
                     Object.keys(statesData[mId].ports).forEach(pId => {
                         const stateKey = `${mId}_${pId}`;
