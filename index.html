@@ -1369,6 +1369,23 @@
         </div>
     </div>
 
+    <!-- Modal nội dung SMS phản hồi -->
+    <div class="modal-overlay" id="sms-content-detail-modal">
+        <div class="modal" style="width: 620px; max-width: 95vw;">
+            <div class="modal-header">
+                <h2 id="sms-detail-title">Nội dung SMS</h2>
+                <button class="close-btn" onclick="closeModal('sms-content-detail-modal')"><i data-lucide="x"></i></button>
+            </div>
+            <div class="modal-body">
+                <div id="sms-detail-meta" style="color: var(--text-muted); font-size: 13px; margin-bottom: 14px; word-break: break-word;"></div>
+                <pre id="sms-detail-body" style="white-space: pre-wrap; word-break: break-word; margin: 0; min-height: 120px; max-height: 420px; overflow: auto; padding: 14px; border-radius: 8px; background: rgba(0,0,0,0.25); border: 1px solid var(--border-color); color: var(--text-main); font-family: inherit; line-height: 1.55;"></pre>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-ghost" onclick="closeModal('sms-content-detail-modal')">Đóng</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Firefox Send SMS Modal -->
     <div class="modal-overlay" id="firefox-sms-modal">
         <div class="modal">
@@ -1480,17 +1497,6 @@
                     <label style="margin-bottom: 0; font-size: 15px; font-weight: 500;">Âm thanh thông báo OTP</label>
                     <label class="switch">
                         <input type="checkbox" id="setting-sound-toggle" onchange="toggleSoundSetting(this)">
-                        <span class="slider round"></span>
-                    </label>
-                </div>
-                <div class="form-group"
-                    style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 0; margin-top: 16px;">
-                    <div style="flex: 1;">
-                        <label style="margin-bottom: 0; font-size: 15px; font-weight: 500; display: block;">Tự động lưu lịch sử &amp; ẩn cổng sau 30s</label>
-                        <span style="font-size: 12px; color: var(--text-muted);">Khi OTP về, tự lưu vào lịch sử và ẩn cổng đó sau 30 giây</span>
-                    </div>
-                    <label class="switch" style="margin-left: 12px; flex-shrink: 0;">
-                        <input type="checkbox" id="setting-auto-history-toggle" onchange="toggleAutoHistorySetting(this)">
                         <span class="slider round"></span>
                     </label>
                 </div>
@@ -1660,7 +1666,7 @@
     <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
     <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
 
-    <script src="app.js?v=2"></script>
+    <script src="app.js?v=25"></script>
     <script>
         lucide.createIcons();
     </script>
