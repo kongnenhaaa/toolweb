@@ -15,6 +15,8 @@ let commandResults = {};
 let appliedCommandResults = {};
 let sendingSmsPorts = new Set();
 let soundEnabled = localStorage.getItem('gsm_sound_enabled') !== 'false'; // default true
+let autoHistoryEnabled = localStorage.getItem('gsm_auto_history_enabled') === 'true'; // default false
+const otpAutoSaveTimers = {}; // portKey -> timeoutId
 let globalAdminHiddenNumbers = [];
 
 window.saveHiddenNumbers = async function() {
@@ -627,9 +629,15 @@ async function applyCommandResult(commandId, result) {
         if (port) {
             port.errorMsg = isActionableSmsError(currentError) ? normalizeSmsError(currentError) : null;
             if (status === 'otp_received' && result.otp) {
+                const prevOtp = port.otp;
                 port.otp = String(result.otp);
                 port.smsSent = false;
                 port.smsSentTime = null;
+                if (prevOtp !== port.otp) {
+                    playNotificationSound();
+                    showToast('OTP moi: ' + result.otp + ' (' + result.portId + ')', 'success');
+                    startOtpAutoSave(result.portId, result.machineId);
+                }
             }
             if (type !== 'sms') {
                 port.commandStatus = null;
@@ -757,7 +765,7 @@ function fetchPorts() {
             if (newPort.otp) {
                 // Chỉ thông báo nếu không phải lần tải dữ liệu đầu tiên khi vừa mở/refresh trang web
                 if (!isInitialFirebaseLoad && (!existingPort || existingPort.otp !== newPort.otp)) {
-                    // Có thể thêm âm thanh ở đây nếu cần
+                    startOtpAutoSave(newPort.id, newPort.machineId);
                 }
             }
         });
@@ -1105,12 +1113,17 @@ function renderPorts() {
             if (port.errorMsg) {
                 otpContent = `<span style="color: var(--danger); font-weight: 500;"><i data-lucide="alert-triangle" style="width: 14px; height: 14px; display: inline; margin-bottom: -2px;"></i> ${escapeHtml(normalizeSmsError(port.errorMsg))}</span>`;
             } else if (port.otp) {
-                otpContent = `<span class="otp-badge">${escapeHtml(port.otp)}</span>`;
+                const pk = port.machineId + '_' + port.id;
+                const hasTmr = !!otpAutoSaveTimers[pk];
+                const cdBadge = (autoHistoryEnabled && hasTmr)
+                    ? `<span class="otp-auto-countdown" data-portkey="${pk}" style="margin-left:6px;font-size:11px;color:var(--warning);background:rgba(245,158,11,0.15);padding:2px 7px;border-radius:10px;">Tu luu sau 30s</span>`
+                    : '';
+                otpContent = `<span class="otp-badge">${escapeHtml(port.otp)}</span>${cdBadge}`;
                 actionButtons = `
-                    <button class="btn btn-success" onclick="markAsUsed('${port.id}', '${port.machineId}')">
+                    <button class="btn btn-success" onclick="cancelOtpAutoSave('${port.id}', '${port.machineId}'); markAsUsed('${port.id}', '${port.machineId}')">
                         <i data-lucide="check-circle"></i> Đã dùng
                     </button>
-                    <button class="btn btn-outline" onclick="cancelSmsWait('${port.id}', '${port.machineId}')" title="Làm mới trạng thái">
+                    <button class="btn btn-outline" onclick="cancelOtpAutoSave('${port.id}', '${port.machineId}'); cancelSmsWait('${port.id}', '${port.machineId}')" title="Làm mới trạng thái">
                         <i data-lucide="refresh-cw"></i> Làm mới
                     </button>
                 `;
@@ -1440,6 +1453,8 @@ function toggleCustomRecipient() {
 
 function openSettingsModal() {
     document.getElementById('setting-sound-toggle').checked = soundEnabled;
+    const autoToggle = document.getElementById('setting-auto-history-toggle');
+    if (autoToggle) autoToggle.checked = autoHistoryEnabled;
     
     const adminSection = document.getElementById('admin-settings-section');
     if (adminSection) {
@@ -1459,6 +1474,47 @@ function toggleSoundSetting(checkbox) {
     localStorage.setItem('gsm_sound_enabled', soundEnabled);
     if (soundEnabled) {
         playNotificationSound();
+    }
+}
+
+function toggleAutoHistorySetting(checkbox) {
+    autoHistoryEnabled = checkbox.checked;
+    localStorage.setItem('gsm_auto_history_enabled', autoHistoryEnabled);
+    if (!autoHistoryEnabled) {
+        Object.keys(otpAutoSaveTimers).forEach(key => {
+            clearTimeout(otpAutoSaveTimers[key]);
+            delete otpAutoSaveTimers[key];
+        });
+    }
+}
+
+function startOtpAutoSave(portId, machineId) {
+    if (!autoHistoryEnabled) return;
+    const portKey = machineId + '_' + portId;
+    if (otpAutoSaveTimers[portKey]) {
+        clearTimeout(otpAutoSaveTimers[portKey]);
+        delete otpAutoSaveTimers[portKey];
+    }
+    let remaining = 30;
+    const tick = setInterval(() => {
+        remaining--;
+        const b = document.querySelector('.otp-auto-countdown[data-portkey="' + portKey + '"]');
+        if (b) b.textContent = 'Tu luu sau ' + remaining + 's';
+        if (remaining <= 0) clearInterval(tick);
+    }, 1000);
+    otpAutoSaveTimers[portKey] = setTimeout(async () => {
+        clearInterval(tick);
+        delete otpAutoSaveTimers[portKey];
+        const p = state.ports.find(x => x.id === portId && x.machineId === machineId);
+        if (p && p.otp && !p.hidden) await markAsUsed(portId, machineId);
+    }, 30000);
+}
+
+function cancelOtpAutoSave(portId, machineId) {
+    const portKey = machineId + '_' + portId;
+    if (otpAutoSaveTimers[portKey]) {
+        clearTimeout(otpAutoSaveTimers[portKey]);
+        delete otpAutoSaveTimers[portKey];
     }
 }
 

@@ -1485,6 +1485,17 @@
                 </div>
                 <div class="form-group"
                     style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 0; margin-top: 16px;">
+                    <div style="flex: 1;">
+                        <label style="margin-bottom: 0; font-size: 15px; font-weight: 500; display: block;">Tự động lưu lịch sử &amp; ẩn cổng sau 30s</label>
+                        <span style="font-size: 12px; color: var(--text-muted);">Khi OTP về, tự lưu vào lịch sử và ẩn cổng đó sau 30 giây</span>
+                    </div>
+                    <label class="switch" style="margin-left: 12px; flex-shrink: 0;">
+                        <input type="checkbox" id="setting-auto-history-toggle" onchange="toggleAutoHistorySetting(this)">
+                        <span class="slider round"></span>
+                    </label>
+                </div>
+                <div class="form-group"
+                    style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 0; margin-top: 16px;">
                     <label style="margin-bottom: 0; font-size: 15px; font-weight: 500;">Hiệu ứng tuyết rơi</label>
                     <label class="switch">
                         <input type="checkbox" id="setting-snow-toggle" onchange="toggleSnowSetting(this)">
