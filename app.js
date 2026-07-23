@@ -20,10 +20,19 @@ let globalAdminHiddenNumbers = [];
 window.saveHiddenNumbers = async function() {
     const el = document.getElementById('setting-hidden-numbers');
     if (!el) return;
+    if (!currentUserProfile || currentUserProfile.role !== 'admin') {
+        showToast('Chỉ Admin mới có quyền lưu danh sách số bị ẩn', 'error');
+        return;
+    }
     const val = el.value || '';
     const numbers = val.split(',').map(n => normalizePhoneNumber(n.trim())).filter(n => n);
-    await db.ref('global_hidden_numbers').set(numbers);
-    showToast('Đã lưu danh sách số bị ẩn', 'success');
+    try {
+        await db.ref('global_hidden_numbers').set(numbers);
+        showToast('Đã lưu danh sách số bị ẩn', 'success');
+    } catch (error) {
+        console.error('Không thể lưu danh sách số bị ẩn', error);
+        showToast('Không thể lưu danh sách số bị ẩn: ' + error.message, 'error');
+    }
 };
 
 const SMS_WAIT_TIMEOUT_MS = 120000;
@@ -38,10 +47,6 @@ const BALANCE_COMMAND_SPACING_MS = 1200;
 const COMMAND_IN_FLIGHT_STATUSES = new Set(['queued', 'running']);
 const COMMAND_SUCCESS_STATUSES = new Set(['sent', 'done', 'success', 'maybe_sent', 'otp_received', 'sms_received', 'message_received', 'received']);
 const COMMAND_FAILED_STATUSES = new Set(['failed', 'timeout', 'error']);
-const BLOCKED_MACHINE_IDS = new Set(['kongnguyeen', 'desktop-o8gddkr']);
-function isBlockedMachine(machineId) {
-    return BLOCKED_MACHINE_IDS.has(String(machineId || '').trim().toLowerCase());
-}
 const CLIENT_SESSION_ID = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 const TAKE_OTP_HIDE_ACTION = 'take_otp_button_v1';
 const pendingOtpStateLatches = new Map();
@@ -708,7 +713,6 @@ function getCommandStatusText(status, type = 'sms') {
 }
 
 async function createCommand({ machineId, portId, recipient, content, type = 'sms', commandId = null }) {
-    if (isBlockedMachine(machineId)) throw new Error('Machine này đã bị chặn trên web.');
     const commandRef = commandId ? db.ref(`commands/${commandId}`) : db.ref('commands').push();
     commandId = commandId || commandRef.key;
     const commandPort = state.ports.find(p => p.id === portId && p.machineId === machineId);
@@ -731,7 +735,6 @@ async function createCommand({ machineId, portId, recipient, content, type = 'sm
 }
 
 async function reservePortCommand({ machineId, portId, commandId, type = 'sms', phone = 'NONE' }) {
-    if (isBlockedMachine(machineId)) return false;
     const stateRef = db.ref(`web_states/machines/${machineId}/ports/${portId}`);
     const result = await stateRef.transaction(current => {
         current = current || {};
@@ -844,7 +847,6 @@ async function updateCommandStateIfCurrent(machineId, portId, commandId, payload
 
 async function applyCommandResult(commandId, result) {
     if (!result || !result.machineId || !result.portId) return false;
-    if (isBlockedMachine(result.machineId)) return false;
     if (result.updatedAt && getServerNow() - result.updatedAt > 10 * 60 * 1000) return false;
 
     const stateKey = `${result.machineId}_${result.portId}`;
@@ -1055,7 +1057,6 @@ function fetchPorts() {
         if (machinesData) {
             // Duyệt qua từng máy tính
             Object.keys(machinesData).forEach(machineId => {
-                if (isBlockedMachine(machineId)) return;
                 const machineNode = machinesData[machineId];
 
                 let lastSync = 0;
@@ -1098,7 +1099,7 @@ function fetchPorts() {
             const machineIsOnline = heartbeatAge <= MACHINE_HEARTBEAT_TIMEOUT_MS;
             const keepStableDuringActiveUi = heartbeatAge <= MACHINE_ACTIVE_UI_GRACE_MS
                 && (hasActivePortWork(existingPort) || Boolean(existingPort.otp));
-            if (!existingPort.isTest && !isBlockedMachine(existingPort.machineId)
+            if (!existingPort.isTest
                 && !fetchedPortKeys.has(portKey) && (machineIsOnline || keepStableDuringActiveUi)) {
                 allPorts.push({ ...existingPort, connectionStale: true });
                 fetchedPortKeys.add(portKey);
@@ -1204,7 +1205,6 @@ function fetchPorts() {
         let mergedRefs = {};
         if (statesData) {
             Object.keys(statesData).forEach(mId => {
-                if (isBlockedMachine(mId)) return;
                 if (statesData[mId].ports) {
                     Object.keys(statesData[mId].ports).forEach(pId => {
                         const stateKey = `${mId}_${pId}`;
@@ -3751,7 +3751,6 @@ function checkConnectionStatus() {
     // Loại bỏ các cổng của máy tính đã chết (không có ping trong 15s)
     const connectedOrBusyPorts = state.ports.filter(p => {
         if (p.isTest) return true;
-        if (isBlockedMachine(p.machineId)) return false;
         const lastSync = lastSyncByMachine[p.machineId] || 0;
         const heartbeatAge = now - lastSync;
         const isAlive = heartbeatAge <= MACHINE_HEARTBEAT_TIMEOUT_MS;

@@ -1,0 +1,58 @@
+{
+  "rules": {
+    "users": {
+      ".read": "auth != null && root.child('users').child(auth.uid).child('role').val() === 'admin'",
+      "$uid": {
+        ".read": "auth != null && ($uid === auth.uid || root.child('users').child(auth.uid).child('role').val() === 'admin')",
+        ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'admin' || ($uid === auth.uid && !data.exists() && newData.child('role').val() === 'customer' && newData.child('active').val() === true && newData.child('email').isString() && newData.child('customerId').isString()))"
+      }
+    },
+    "tenants": {
+      ".read": "auth != null && root.child('users').child(auth.uid).child('role').val() === 'admin'",
+      "$customerId": {
+        ".read": "auth != null && (root.child('users').child(auth.uid).child('customerId').val() === $customerId || root.child('users').child(auth.uid).child('role').val() === 'admin')",
+        ".write": "auth != null && (root.child('users').child(auth.uid).child('customerId').val() === $customerId || root.child('users').child(auth.uid).child('role').val() === 'admin')"
+      }
+    },
+    "admin_logs": {
+      ".read": "auth != null && root.child('users').child(auth.uid).child('role').val() === 'admin'",
+      ".write": "auth != null && root.child('users').child(auth.uid).child('role').val() === 'admin'"
+    },
+    "history": {
+      ".read": "auth != null && root.child('users').child(auth.uid).child('role').val() === 'admin'",
+      ".write": false
+    },
+    "firefox_config": {
+      ".read": "auth != null && root.child('users').child(auth.uid).child('role').val() === 'admin'",
+      ".write": false
+    },
+    "global_note": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "global_hidden_numbers": {
+      ".read": "auth != null",
+      ".write": "auth != null && root.child('users').child(auth.uid).child('role').val() === 'admin'"
+    },
+    "server_status": {
+      ".read": true,
+      ".write": true
+    },
+    "machines": {
+      ".read": true,
+      ".write": true
+    },
+    "web_states": {
+      ".read": true,
+      ".write": true
+    },
+    "command_results": {
+      ".read": true,
+      ".write": true
+    },
+    "commands": {
+      ".read": true,
+      ".write": true
+    }
+  }
+}
