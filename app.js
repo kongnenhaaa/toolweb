@@ -55,6 +55,81 @@ let currentUserProfile = null;
 let isImpersonating = false;
 window.viewingTenantId = null;
 
+const DEVICE_SESSION_STORAGE_KEY = 'toolweb_device_session_id';
+let activeDeviceSessionId = null;
+let deviceSessionRef = null;
+let isSigningOutForDeviceSession = false;
+
+function getDeviceSessionId() {
+    try {
+        const stored = localStorage.getItem(DEVICE_SESSION_STORAGE_KEY);
+        if (/^[a-f0-9]{64}$/.test(stored || '')) return stored;
+
+        const bytes = new Uint8Array(32);
+        if (window.crypto?.getRandomValues) {
+            window.crypto.getRandomValues(bytes);
+        } else {
+            for (let i = 0; i < bytes.length; i += 1) bytes[i] = Math.floor(Math.random() * 256);
+        }
+        const sessionId = Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
+        localStorage.setItem(DEVICE_SESSION_STORAGE_KEY, sessionId);
+        return sessionId;
+    } catch {
+        return Array.from({ length: 64 }, () => Math.floor(Math.random() * 16).toString(16)).join('');
+    }
+}
+
+async function claimDeviceSession(user) {
+    if (!user || currentUserProfile?.role === 'admin') return null;
+
+    const sessionId = getDeviceSessionId();
+    // Refresh once when claiming the device so an old/revoked cached token is not reused.
+    const idToken = await user.getIdToken(true);
+    const response = await fetch('/api/session', {
+        method: 'POST',
+        headers: {
+            Authorization: `Bearer ${idToken}`,
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ sessionId }),
+        cache: 'no-store'
+    });
+
+    if (!response.ok) {
+        let message = `Không thể xác nhận thiết bị (HTTP ${response.status})`;
+        try {
+            const payload = await response.json();
+            if (payload?.error) message = payload.error;
+        } catch { }
+        throw new Error(message);
+    }
+
+    activeDeviceSessionId = sessionId;
+    return sessionId;
+}
+
+function stopDeviceSessionWatch() {
+    if (deviceSessionRef) deviceSessionRef.off();
+    deviceSessionRef = null;
+    activeDeviceSessionId = null;
+}
+
+function watchDeviceSession(user) {
+    stopDeviceSessionWatch();
+    if (!user || currentUserProfile?.role === 'admin') return;
+
+    deviceSessionRef = db.ref(`users/${user.uid}/activeSessionId`);
+    deviceSessionRef.on('value', async snapshot => {
+        if (!activeDeviceSessionId || isSigningOutForDeviceSession) return;
+        if (snapshot.val() && snapshot.val() !== activeDeviceSessionId) {
+            isSigningOutForDeviceSession = true;
+            showToast('Tài khoản vừa được đăng nhập trên thiết bị khác.', 'error');
+            await auth.signOut();
+            window.location.reload();
+        }
+    });
+}
+
 function getTenantId() {
     if (window.viewingTenantId) return window.viewingTenantId;
     if (!currentUserProfile || !currentUserProfile.customerId) {
@@ -3539,6 +3614,18 @@ auth.onAuthStateChanged(async (user) => {
                 auth.signOut();
                 return;
             }
+
+            // User thường chỉ được giữ một thiết bị hoạt động; Admin được miễn giới hạn này.
+            try {
+                await claimDeviceSession(user);
+            } catch (sessionError) {
+                currentUserProfile = null;
+                showToast(`Không thể đăng nhập: ${sessionError.message}`, 'error');
+                await auth.signOut();
+                return;
+            }
+
+            watchDeviceSession(user);
             
             document.getElementById('login-container').style.display = 'none';
             document.getElementById('main-app').style.display = 'flex';
@@ -3564,6 +3651,8 @@ auth.onAuthStateChanged(async (user) => {
         }
     } else {
         // Chưa đăng nhập
+        stopDeviceSessionWatch();
+        isSigningOutForDeviceSession = false;
         if (isAppInitialized) {
             // Tải lại trang để xoá toàn bộ listener Firebase (tránh lỗi permission_denied)
             window.location.reload();
@@ -3836,7 +3925,11 @@ function loadFirefoxConfig() {
         if (baseUrlEl) baseUrlEl.value = config.baseUrl || '/api/firefox';
 
         const tokenEl = document.getElementById('ff-token');
-        if (tokenEl) tokenEl.value = config.token || '';
+        if (tokenEl) {
+            tokenEl.value = '';
+            tokenEl.disabled = true;
+            tokenEl.placeholder = 'Token được bảo vệ ở server';
+        }
 
         const srvIdEl = document.getElementById('ff-service-id');
         if (srvIdEl) srvIdEl.value = config.serviceId || '';
@@ -3877,7 +3970,6 @@ window.firefoxSaveConfig = function () {
     if (isImpersonating) return showToast('Bạn đang ở chế độ Chỉ Đọc', 'error');
     const config = {
         baseUrl: document.getElementById('ff-base-url') ? document.getElementById('ff-base-url').value.trim() : '/api/firefox',
-        token: 'HIDDEN',
         serviceId: document.getElementById('ff-service-id') ? document.getElementById('ff-service-id').value.trim() : '1049',
         country: document.getElementById('ff-country') ? document.getElementById('ff-country').value.trim() : 'vnm'
     };
@@ -3889,7 +3981,6 @@ window.firefoxSaveConfig = function () {
 function getFirefoxConfig() {
     return {
         baseUrl: '/api/firefox',
-        token: 'HIDDEN',
         serviceId: '1049',
         country: 'vnm'
     };
@@ -3898,13 +3989,16 @@ function getFirefoxConfig() {
 async function callFirefoxApi(params, timeoutMs = 8000) {
     const config = getFirefoxConfig();
     const baseUrl = config.baseUrl || '/api/firefox';
-    if (!config.token && params.act !== 'getItem') {
-        showToast('Vui lòng nhập Token trước!', 'error');
+    const user = auth.currentUser;
+    if (!user) {
+        showToast('Vui lòng đăng nhập trước khi gọi Firefox API.', 'error');
         return null;
     }
 
-    if (config.token) {
-        params.token = config.token;
+    const idToken = await user.getIdToken();
+    const requestHeaders = { Authorization: `Bearer ${idToken}` };
+    if (currentUserProfile?.role !== 'admin') {
+        requestHeaders['X-Device-Session'] = activeDeviceSessionId || getDeviceSessionId();
     }
 
     const requestParams = { ...params, _ts: Date.now() };
@@ -3922,6 +4016,7 @@ async function callFirefoxApi(params, timeoutMs = 8000) {
             method: 'GET',
             cache: 'no-store',
             signal: controller.signal,
+            headers: requestHeaders
         });
         if (!response.ok) {
             throw new Error(`HTTP ${response.status}`);

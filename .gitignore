@@ -16,3 +16,8 @@ Thumbs.db
 *.bat
 
 .vercel
+
+# Deployment secrets
+.env
+.env.*
+!.env.example
