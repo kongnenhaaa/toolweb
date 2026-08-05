@@ -56,9 +56,28 @@ let isImpersonating = false;
 window.viewingTenantId = null;
 
 const DEVICE_SESSION_STORAGE_KEY = 'toolweb_device_session_id';
+const DEVICE_KICK_NOTICE_KEY = 'toolweb_device_kick_notice';
 let activeDeviceSessionId = null;
 let deviceSessionRef = null;
+let deviceSessionCheckTimer = null;
 let isSigningOutForDeviceSession = false;
+
+function isFirefoxApiAllowed(profile = currentUserProfile) {
+    return profile?.role === 'admin' || profile?.allowFirefoxApi !== false;
+}
+
+function updateFirefoxApiVisibility() {
+    const navFirefox = document.getElementById('nav-firefox');
+    const allowed = isFirefoxApiAllowed();
+    if (navFirefox) navFirefox.style.display = allowed ? 'flex' : 'none';
+
+    const firefoxView = document.getElementById('firefox-view');
+    if (!allowed && firefoxView && firefoxView.style.display !== 'none') {
+        firefoxView.style.display = 'none';
+        const fallback = document.getElementById('nav-active') || document.getElementById('nav-history');
+        if (fallback) fallback.click();
+    }
+}
 
 function getDeviceSessionId() {
     try {
@@ -111,7 +130,38 @@ async function claimDeviceSession(user) {
 function stopDeviceSessionWatch() {
     if (deviceSessionRef) deviceSessionRef.off();
     deviceSessionRef = null;
+    if (deviceSessionCheckTimer) clearInterval(deviceSessionCheckTimer);
+    deviceSessionCheckTimer = null;
     activeDeviceSessionId = null;
+}
+
+async function handleReplacedDeviceSession() {
+    if (isSigningOutForDeviceSession) return;
+    isSigningOutForDeviceSession = true;
+    try {
+        sessionStorage.setItem(DEVICE_KICK_NOTICE_KEY, 'Tài khoản vừa được đăng nhập trên thiết bị khác.');
+    } catch { }
+    await auth.signOut();
+    window.location.reload();
+}
+
+async function checkDeviceSessionWithServer(user) {
+    if (!user || !activeDeviceSessionId || isSigningOutForDeviceSession) return;
+
+    try {
+        const idToken = await user.getIdToken();
+        const response = await fetch('/api/session', {
+            method: 'GET',
+            headers: {
+                Authorization: `Bearer ${idToken}`,
+                'X-Device-Session': activeDeviceSessionId
+            },
+            cache: 'no-store'
+        });
+        if (response.status === 409) await handleReplacedDeviceSession();
+    } catch (error) {
+        console.warn('Không thể kiểm tra phiên thiết bị:', error);
+    }
 }
 
 function watchDeviceSession(user) {
@@ -122,12 +172,17 @@ function watchDeviceSession(user) {
     deviceSessionRef.on('value', async snapshot => {
         if (!activeDeviceSessionId || isSigningOutForDeviceSession) return;
         if (snapshot.val() && snapshot.val() !== activeDeviceSessionId) {
-            isSigningOutForDeviceSession = true;
+            await handleReplacedDeviceSession();
             showToast('Tài khoản vừa được đăng nhập trên thiết bị khác.', 'error');
-            await auth.signOut();
-            window.location.reload();
+            try {
+                sessionStorage.setItem(DEVICE_KICK_NOTICE_KEY, 'Tài khoản vừa được đăng nhập trên thiết bị khác.');
+            } catch { }
+            await handleReplacedDeviceSession();
         }
     });
+
+    checkDeviceSessionWithServer(user);
+    deviceSessionCheckTimer = setInterval(() => checkDeviceSessionWithServer(user), 5000);
 }
 
 function getTenantId() {
@@ -3550,11 +3605,32 @@ window.viewUserStats = function(customerId) {
     }
 }
 
-function logout() {
-    auth.signOut().then(() => {
-        window.location.reload();
-    });
+async function releaseDeviceSession() {
+    const user = auth.currentUser;
+    if (!user || currentUserProfile?.role === 'admin' || !activeDeviceSessionId) return;
+
+    try {
+        const idToken = await user.getIdToken();
+        await fetch('/api/session', {
+            method: 'DELETE',
+            headers: {
+                Authorization: `Bearer ${idToken}`,
+                'X-Device-Session': activeDeviceSessionId
+            },
+            cache: 'no-store'
+        });
+    } catch (error) {
+        console.warn('Không thể giải phóng phiên thiết bị:', error);
+    }
 }
+
+async function logout() {
+    await releaseDeviceSession();
+    await auth.signOut();
+    window.location.reload();
+}
+
+window.logout = logout;
 
 window.checkUserLimits = function() {
     // Admin không bị giới hạn hoặc chế độ đọc
@@ -3662,6 +3738,14 @@ auth.onAuthStateChanged(async (user) => {
         currentUserProfile = null;
         document.getElementById('login-container').style.display = 'flex';
         document.getElementById('main-app').style.display = 'none';
+
+        try {
+            const notice = sessionStorage.getItem(DEVICE_KICK_NOTICE_KEY);
+            if (notice) {
+                sessionStorage.removeItem(DEVICE_KICK_NOTICE_KEY);
+                setTimeout(() => showToast(notice, 'error'), 100);
+            }
+        } catch { }
         
         // Dọn dẹp dữ liệu hiển thị
         state.ports = [];

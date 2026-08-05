@@ -434,7 +434,7 @@
             </nav>
 
             <a href="#" class="nav-item"
-                onclick="window.showConfirm('Bạn có chắc chắn muốn đăng xuất?').then(res => { if(res) auth.signOut(); }); return false;"
+                onclick="window.showConfirm('Bạn có chắc chắn muốn đăng xuất?').then(res => { if(res) logout(); }); return false;"
                 style="margin-top: 8px; margin-left: 16px; margin-right: 16px; color: var(--danger);">
                 <i data-lucide="log-out"></i>
                 Đăng xuất
@@ -1666,7 +1666,7 @@
     <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
     <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
 
-    <script src="app.js?v=25"></script>
+    <script src="app.js?v=26"></script>
     <script>
         lucide.createIcons();
     </script>

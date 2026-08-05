@@ -62,6 +62,8 @@ export default async function handler(req, res) {
         res.status(status).json({
             error: status === 409
                 ? 'This account is active on another device'
+                : status === 403
+                    ? error.message || 'Firefox API is disabled for this account'
                 : status === 504
                     ? 'Firefox API timeout'
                     : status === 401

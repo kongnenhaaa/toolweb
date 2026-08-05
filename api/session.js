@@ -20,15 +20,19 @@ export default async function handler(req, res) {
         return;
     }
 
-    if (req.method !== 'POST') {
-        res.setHeader('Allow', 'POST, OPTIONS');
+    if (req.method !== 'GET' && req.method !== 'POST' && req.method !== 'DELETE') {
+        res.setHeader('Allow', 'GET, POST, DELETE, OPTIONS');
         sendError(res, 405, 'Method not allowed');
         return;
     }
 
     try {
         const decodedToken = await verifyBearerToken(req);
-        const sessionId = String(req.body?.sessionId || '').trim();
+        const sessionId = String(
+            req.headers?.['x-device-session']
+            || req.body?.sessionId
+            || ''
+        ).trim();
         if (!/^[a-f0-9]{64}$/.test(sessionId)) {
             sendError(res, 400, 'Invalid device session');
             return;
@@ -47,7 +51,40 @@ export default async function handler(req, res) {
             return;
         }
 
-        await getAdminDb().ref(`users/${decodedToken.uid}`).update({
+        const userRef = getAdminDb().ref(`users/${decodedToken.uid}`);
+
+        if (req.method === 'GET') {
+            const activeSessionSnapshot = await userRef.child('activeSessionId').once('value');
+            if (activeSessionSnapshot.val() !== sessionId) {
+                const error = new Error('This account is active on another device');
+                error.statusCode = 409;
+                throw error;
+            }
+
+            res.status(200).json({ ok: true, active: true });
+            return;
+        }
+
+        if (req.method === 'DELETE') {
+            const releaseResult = await userRef.transaction(current => {
+                if (!current || current.activeSessionId !== sessionId) return;
+                return {
+                    ...current,
+                    activeSessionId: null,
+                    activeSessionUpdatedAt: null
+                };
+            });
+
+            res.status(200).json({
+                ok: true,
+                released: Boolean(releaseResult.committed)
+            });
+            return;
+        }
+
+        // Latest login wins. The previous device observes this value through
+        // its realtime listener and signs out with a visible notification.
+        await userRef.update({
             activeSessionId: sessionId,
             activeSessionUpdatedAt: Date.now()
         });
