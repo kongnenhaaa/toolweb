@@ -37,11 +37,10 @@ window.saveHiddenNumbers = async function() {
 
 const SMS_WAIT_TIMEOUT_MS = 120000;
 const BALANCE_WAIT_TIMEOUT_MS = 45000;
-const MACHINE_HEARTBEAT_TIMEOUT_MS = 15000;
-// ToolGSM normally pings every 2 seconds. Keep a COM that is sending/waiting/holding
-// an OTP through a short network hiccup so its row does not flicker out of the UI.
-// A genuinely offline machine is still removed after this confirmation window.
-const MACHINE_ACTIVE_UI_GRACE_MS = 60000;
+// ToolGSM normally pings every 2 seconds, but Windows/serial work can delay a
+// snapshot for much longer. Never flip a COM to Offline from a short gap or a
+// transient worker status. Confirm a real disconnect for five minutes first.
+const MACHINE_OFFLINE_CONFIRM_MS = 5 * 60 * 1000;
 const COMMAND_STALE_TIMEOUT_MS = 10 * 60 * 1000;
 const BALANCE_COMMAND_SPACING_MS = 1200;
 const COMMAND_IN_FLIGHT_STATUSES = new Set(['queued', 'running']);
@@ -50,6 +49,9 @@ const COMMAND_FAILED_STATUSES = new Set(['failed', 'timeout', 'error']);
 const CLIENT_SESSION_ID = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 const TAKE_OTP_HIDE_ACTION = 'take_otp_button_v1';
 const pendingOtpStateLatches = new Map();
+const pendingPortPhoneChanges = new Map();
+const PHONE_CHANGE_CONFIRMATIONS = 3;
+const PHONE_CHANGE_STABLE_MS = 4000;
 
 let currentUserProfile = null;
 let isImpersonating = false;
@@ -267,7 +269,11 @@ function parseBalanceValue(balance) {
 
 function normalizePhoneNumber(phone) {
     if (phone == null) return phone;
-    return String(phone).replace(/\s+/g, '').trim();
+    const raw = String(phone).replace(/\s+/g, '').trim();
+    const digits = raw.replace(/\D/g, '');
+    if (/^84\d{9,10}$/.test(digits)) return `0${digits.slice(2)}`;
+    if (/^0\d{9,10}$/.test(digits)) return digits;
+    return raw;
 }
 
 function normalizeVietnamSmsRecipient(value) {
@@ -287,6 +293,60 @@ function isMissingPortDisplayValue(value) {
         || normalized === 'null'
         || normalized === 'unknown'
         || normalized === 'trong';
+}
+
+function getStablePortPhone(newPort, existingPort, now = getServerNow()) {
+    const portKey = `${newPort?.machineId || existingPort?.machineId || ''}_${newPort?.id || existingPort?.id || ''}`;
+    const incomingPhone = normalizePhoneNumber(newPort?.phone || '');
+    const displayedPhone = normalizePhoneNumber(existingPort?.phone || '');
+
+    if (isMissingPortDisplayValue(incomingPhone)) {
+        pendingPortPhoneChanges.delete(portKey);
+        return isMissingPortDisplayValue(displayedPhone) ? incomingPhone : displayedPhone;
+    }
+
+    if (isMissingPortDisplayValue(displayedPhone)) {
+        pendingPortPhoneChanges.delete(portKey);
+        return incomingPhone;
+    }
+
+    if (incomingPhone === displayedPhone) {
+        pendingPortPhoneChanges.delete(portKey);
+        return displayedPhone;
+    }
+
+    const pending = pendingPortPhoneChanges.get(portKey);
+    if (!pending || pending.phone !== incomingPhone) {
+        pendingPortPhoneChanges.set(portKey, {
+            phone: incomingPhone,
+            confirmations: 1,
+            firstSeenAt: now,
+            lastSeenAt: now
+        });
+        return displayedPhone;
+    }
+
+    pending.confirmations += 1;
+    pending.lastSeenAt = now;
+    if (pending.confirmations >= PHONE_CHANGE_CONFIRMATIONS
+        && now - pending.firstSeenAt >= PHONE_CHANGE_STABLE_MS) {
+        pendingPortPhoneChanges.delete(portKey);
+        return incomingPhone;
+    }
+
+    pendingPortPhoneChanges.set(portKey, pending);
+    return displayedPhone;
+}
+
+function getCanonicalPortId(firebasePortId, portValue = {}) {
+    const keyPortId = String(firebasePortId || '').trim();
+    const payloadPortId = String(portValue.portId || portValue.id || '').trim();
+
+    // The Firebase child key is the stable physical COM identity. A transient
+    // payload.id from another worker/COM must never move a phone to another row.
+    if (/^COM\d+$/i.test(keyPortId)) return keyPortId.toUpperCase();
+    if (/^COM\d+$/i.test(payloadPortId)) return payloadPortId.toUpperCase();
+    return keyPortId || payloadPortId;
 }
 
 const ALLOWED_ZALO_SMS_ENDPOINTS = new Set(['zalo', '8500', '7539']);
@@ -385,9 +445,89 @@ function isPortHiddenByTakeOtpButton(webState, otp = null) {
     return otp == null || String(webState.hiddenOtp) === String(otp);
 }
 
+function getHistoryOtpBarrier(port, otp) {
+    const candidate = String(otp || '');
+    if (!candidate) return { matched: false, smsRevision: 0, timestamp: 0 };
+
+    const portPhone = port?.phone ? normalizePhoneNumber(port.phone) : '';
+    let matched = false;
+    let smsRevision = 0;
+    let timestamp = 0;
+
+    (state.history || []).forEach(item => {
+        if (!item || item.source === 'firefox' || item.machineId === 'FIREFOX_API') return;
+        if (String(item.otp || '') !== candidate) return;
+
+        const samePort = String(item.machineId || '') === String(port?.machineId || '')
+            && String(item.id || item.portId || '') === String(port?.id || port?.portId || '');
+        const itemPhone = item.phone ? normalizePhoneNumber(item.phone) : '';
+        const samePhone = Boolean(portPhone && itemPhone && portPhone === itemPhone);
+        if (!samePort && !samePhone) return;
+
+        matched = true;
+        smsRevision = Math.max(smsRevision, Number(item.smsRevision || 0));
+        timestamp = Math.max(timestamp, getHistorySortTimestamp(item));
+    });
+
+    return { matched, smsRevision, timestamp };
+}
+
+function getConsumedOtpBarrier(port, webState = {}, otp = '') {
+    const candidate = String(otp || '');
+    const historyBarrier = getHistoryOtpBarrier(port, candidate);
+    let matched = historyBarrier.matched;
+    let smsRevision = historyBarrier.smsRevision;
+    let timestamp = historyBarrier.timestamp;
+
+    const stateMarkers = [
+        [webState.dismissedOtp, webState.dismissedSmsRevision, webState.dismissedAt],
+        [webState.hiddenOtp, webState.hiddenSmsRevision, webState.hiddenAt],
+        [webState.clearedOtp, webState.awaitSmsAfterRevision, webState.updatedAt]
+    ];
+
+    stateMarkers.forEach(([markerOtp, markerRevision, markerTimestamp]) => {
+        if (!markerOtp || String(markerOtp) !== candidate) return;
+        matched = true;
+        smsRevision = Math.max(smsRevision, Number(markerRevision || 0));
+        timestamp = Math.max(timestamp, Number(markerTimestamp || 0));
+    });
+
+    return { matched, smsRevision, timestamp };
+}
+
+function isFreshOtpFromGsm(port, webState = {}, otp = '') {
+    const candidate = String(otp || '');
+    if (!candidate) return false;
+
+    const barrier = getConsumedOtpBarrier(port, webState, candidate);
+    if (!barrier.matched) return true;
+
+    // ToolGSM increments smsRevision whenever it publishes a genuinely new SMS.
+    // The same numeric OTP is therefore accepted only with a newer revision.
+    const machineSmsRevision = Number(port?.smsRevision || 0);
+    if (machineSmsRevision > 0 && machineSmsRevision > barrier.smsRevision) return true;
+
+    // Command results are another authoritative GSM event. A latched result must
+    // be newer than the history/dismiss marker before the cached value is trusted.
+    const webOtpReceivedAt = Number(webState.otpReceivedAt || 0);
+    return String(webState.otp || '') === candidate
+        && webState.commandStatus === 'otp_received'
+        && webOtpReceivedAt > 0
+        && webOtpReceivedAt > barrier.timestamp;
+}
+
+function shouldSuppressConsumedOtp(port, webState = {}, otp = '') {
+    const candidate = String(otp || '');
+    if (!candidate) return false;
+    return getConsumedOtpBarrier(port, webState, candidate).matched
+        && !isFreshOtpFromGsm(port, webState, candidate);
+}
+
 function getTrustedPortOtp(port, webState = {}, incomingSmsText = '') {
     const otpFromText = incomingSmsText ? extractOtpFromSmsText(incomingSmsText) : '';
-    if (otpFromText) return String(otpFromText);
+    if (otpFromText && !shouldSuppressConsumedOtp(port, webState, otpFromText)) {
+        return String(otpFromText);
+    }
 
     const webOtpIsPreviousRequest = webState.smsSent === true
         && webState.clearedOtp
@@ -395,7 +535,8 @@ function getTrustedPortOtp(port, webState = {}, incomingSmsText = '') {
         && !incomingSmsText;
     if (!webOtpIsPreviousRequest
         && webState.otp
-        && /^\d{4,8}$/.test(String(webState.otp))) {
+        && /^\d{4,8}$/.test(String(webState.otp))
+        && !shouldSuppressConsumedOtp(port, webState, webState.otp)) {
         return String(webState.otp);
     }
 
@@ -404,9 +545,10 @@ function getTrustedPortOtp(port, webState = {}, incomingSmsText = '') {
 
     // New ToolGSM builds publish the actual sender. Keep recipient correlation as
     // a fallback for an older worker while an 8500/7539 request is still active.
-    if (isAllowedZaloSmsEndpoint(getIncomingSmsSender(port))
+    if (!shouldSuppressConsumedOtp(port, webState, rawOtp)
+        && (isAllowedZaloSmsEndpoint(getIncomingSmsSender(port))
         || isAllowedZaloSmsEndpoint(webState.smsRecipient)
-        || isAllowedZaloSmsEndpoint(port?.smsRecipient)) {
+        || isAllowedZaloSmsEndpoint(port?.smsRecipient))) {
         return rawOtp;
     }
     return '';
@@ -436,7 +578,8 @@ function latchReceivedOtpState(port, webState, otp, smsText = '') {
 
         // Once the operator presses "Đã lấy OTP", recurring machine snapshots
         // containing that same OTP are not allowed to make the COM reappear.
-        if (isPortHiddenByTakeOtpButton(current, otp)) return;
+        if (isPortHiddenByTakeOtpButton(current, otp)
+            && !isFreshOtpFromGsm(port, current, otp)) return;
 
         const currentIsAlreadyLatched = String(current.otp || '') === String(otp)
             && current.smsSent !== true
@@ -463,7 +606,11 @@ function latchReceivedOtpState(port, webState, otp, smsText = '') {
             commandStatus: 'otp_received',
             errorMsg: null,
             clearedOtp: null,
+            dismissedOtp: null,
+            dismissedSmsRevision: null,
+            dismissedAt: null,
             hiddenOtp: null,
+            hiddenSmsRevision: null,
             hiddenByAuto: null,
             hiddenMode: null,
             hiddenAction: null,
@@ -671,7 +818,7 @@ function renderOpsDashboard() {
     const smsErrors = ports.filter(p => p.errorMsg).length;
     const runningCommands = ports.filter(p => COMMAND_IN_FLIGHT_STATUSES.has(p.commandStatus)).length;
     const now = getServerNow();
-    const lostMachines = Object.entries(lastSyncByMachine).filter(([, sync]) => now - sync > MACHINE_HEARTBEAT_TIMEOUT_MS).length;
+    const lostMachines = Object.entries(lastSyncByMachine).filter(([, sync]) => now - sync > MACHINE_OFFLINE_CONFIRM_MS).length;
 
     const cards = sortByStoredOrder([
         { key: 'ports', icon: 'server', label: 'Cổng online/offline', value: `${online}/${offline}`, tone: online ? 'success' : 'muted' },
@@ -1069,6 +1216,18 @@ async function applyCommandResult(commandId, result) {
             updatePayload.smsSent = false;
             updatePayload.otp = receivedOtp;
             updatePayload.commandStatus = 'otp_received';
+            updatePayload.otpReceivedAt = result.smsReceivedAt
+                || result.messageAt
+                || firebase.database.ServerValue.TIMESTAMP;
+            updatePayload.clearedOtp = null;
+            updatePayload.dismissedOtp = null;
+            updatePayload.dismissedSmsRevision = null;
+            updatePayload.dismissedAt = null;
+            updatePayload.hiddenOtp = null;
+            updatePayload.hiddenSmsRevision = null;
+            updatePayload.hiddenByAuto = null;
+            updatePayload.hiddenMode = null;
+            updatePayload.hiddenAction = null;
         }
         Object.assign(updatePayload, incomingSmsPayload);
         if (type !== 'sms') {
@@ -1203,21 +1362,22 @@ function fetchPorts() {
                     lastSyncByMachine[machineId] = lastSync;
                 }
 
-                // Chỉ lấy cổng của những máy tính đang sống. Cổng đang chạy lệnh sẽ được
-                // giữ lại bên dưới nếu worker tạm ngừng heartbeat trong lúc gửi SMS.
-                if (now - lastSync <= MACHINE_HEARTBEAT_TIMEOUT_MS) {
+                // Giữ máy Online qua các khoảng heartbeat đến chậm. Chỉ coi là
+                // mất kết nối sau khi vượt ngưỡng xác nhận dài ở trên.
+                if (now - lastSync <= MACHINE_OFFLINE_CONFIRM_MS) {
                     if (machineNode.ports && typeof machineNode.ports === 'object') {
                         // Firebase key là nguồn dự phòng đáng tin cậy cho COM. Một bản ghi thiếu
                         // `id` không được phép làm hỏng toàn bộ callback renderPorts().
                         const portsArray = Object.entries(machineNode.ports)
                             .filter(([, portValue]) => portValue && typeof portValue === 'object' && !Array.isArray(portValue))
                             .map(([firebasePortId, portValue]) => {
-                                const normalizedId = String(portValue.id || portValue.portId || firebasePortId || '').trim();
+                                const normalizedId = getCanonicalPortId(firebasePortId, portValue);
                                 return {
                                     ...portValue,
                                     id: normalizedId,
-                                    portId: String(portValue.portId || portValue.id || firebasePortId || '').trim(),
+                                    portId: normalizedId,
                                     machineId,
+                                    status: 'online',
                                     connectionStale: false
                                 };
                             })
@@ -1228,25 +1388,23 @@ function fetchPorts() {
             });
         }
 
-        // Một số worker bị chậm heartbeat hoặc tạm bỏ node COM khi đang thực thi AT command.
-        // Không xóa dòng COM khỏi UI trong lúc lệnh vẫn đang chạy/chờ OTP.
+        // Một số worker bị chậm heartbeat hoặc tạm bỏ node COM khi đang thực thi
+        // AT command. Giữ mọi COM ổn định, không chỉ COM đang chờ OTP.
         const fetchedPortKeys = new Set(allPorts.map(p => `${p.machineId}_${p.id}`));
         state.ports.forEach(existingPort => {
             const portKey = `${existingPort.machineId}_${existingPort.id}`;
             const heartbeatAge = now - (lastSyncByMachine[existingPort.machineId] || 0);
-            const machineIsOnline = heartbeatAge <= MACHINE_HEARTBEAT_TIMEOUT_MS;
-            const keepStableDuringActiveUi = heartbeatAge <= MACHINE_ACTIVE_UI_GRACE_MS
-                && (hasActivePortWork(existingPort) || Boolean(existingPort.otp));
+            const machineIsConfirmedOnline = heartbeatAge <= MACHINE_OFFLINE_CONFIRM_MS;
             if (!existingPort.isTest
-                && !fetchedPortKeys.has(portKey) && (machineIsOnline || keepStableDuringActiveUi)) {
-                allPorts.push({ ...existingPort, connectionStale: true });
+                && !fetchedPortKeys.has(portKey) && machineIsConfirmedOnline) {
+                allPorts.push({ ...existingPort, status: 'online', connectionStale: false });
                 fetchedPortKeys.add(portKey);
             }
         });
 
         allPorts.forEach(newPort => {
             const existingPort = state.ports.find(p => p.id === newPort.id && p.machineId === newPort.machineId);
-            if (newPort.phone) newPort.phone = normalizePhoneNumber(newPort.phone);
+            newPort.phone = getStablePortPhone(newPort, existingPort, now);
 
             // Refresh/reconnect can briefly publish empty SIM metadata before
             // phone and balance are restored. Never let that transient snapshot
@@ -1313,6 +1471,14 @@ function fetchPorts() {
                 newPort.otp = null;
             }
 
+            // Never carry an OTP that has already been saved/dismissed back
+            // from a recurring machine snapshot, browser cache or web_states.
+            // A newer smsRevision (or a newer authoritative command result)
+            // is required before the same numeric value may appear again.
+            if (newPort.otp && shouldSuppressConsumedOtp(newPort, portWebState, newPort.otp)) {
+                newPort.otp = null;
+            }
+
             // Giữ lại thời gian bắt đầu đếm ngược để không bị reset khi Firebase cập nhật
             if (existingPort && existingPort.smsSentTime) {
                 newPort.smsSentTime = existingPort.smsSentTime;
@@ -1330,6 +1496,10 @@ function fetchPorts() {
         // Retain locally created test ports
         const testPorts = state.ports.filter(p => p.isTest);
         state.ports = [...allPorts, ...testPorts];
+        const currentPortKeys = new Set(allPorts.map(port => `${port.machineId}_${port.id}`));
+        pendingPortPhoneChanges.forEach((_, portKey) => {
+            if (!currentPortKeys.has(portKey)) pendingPortPhoneChanges.delete(portKey);
+        });
 
         applyWebStates();
     }, (error) => {
@@ -1384,13 +1554,16 @@ function applyWebStates() {
             port.smsContent = incomingSmsText;
             if (!port.otp && !nonOtpSms) {
                 const extractedOtp = extractOtpFromSmsText(incomingSmsText);
-                if (extractedOtp) {
+                if (extractedOtp && !shouldSuppressConsumedOtp(port, webState, extractedOtp)) {
                     port.otp = extractedOtp;
                 }
             }
         }
         const trustedOtp = getTrustedPortOtp(port, webState, incomingSmsText);
         if (trustedOtp) port.otp = trustedOtp;
+        if (port.otp && shouldSuppressConsumedOtp(port, webState, port.otp)) {
+            port.otp = null;
+        }
         if (isSmsSent || COMMAND_IN_FLIGHT_STATUSES.has(webState.commandStatus)) {
             // A new command always keeps the COM visible while waiting for
             // its result, even if an older OTP was hidden before the send.
@@ -1403,9 +1576,10 @@ function applyWebStates() {
             port.smsRequestContent = String(webState.smsRequestContent);
         }
 
-        // OTP gần nhất được giữ trong web_states để vẫn hiện sau refresh trình duyệt
-        // hoặc sau khi ToolGSM khởi động lại. OTP mới từ GSM sẽ thay thế giá trị này.
-        if (!port.otp && webState.otp && !nonOtpSms) {
+        // Chỉ khôi phục OTP được GSM xác nhận là mới. Tuyệt đối không lấy lại
+        // OTP đã dùng từ history/web_states sau refresh hoặc reconnect.
+        if (!port.otp && webState.otp && !nonOtpSms
+            && !shouldSuppressConsumedOtp(port, webState, webState.otp)) {
             const previousOtp = port.otp;
             port.otp = String(webState.otp);
             if (previousOtp !== port.otp) {
@@ -1447,7 +1621,7 @@ function applyWebStates() {
         const hiddenByTakeOtpButton = isPortHiddenByTakeOtpButton(
             webState,
             port.otp || webState.otp || null
-        );
+        ) && !isFreshOtpFromGsm(port, webState, port.otp || webState.otp || null);
 
         if (port.otp) {
             // OTP is latched: delayed callbacks may not change this row back
@@ -2072,36 +2246,46 @@ function openSmsModal(portId, machineId) {
 
 function openSmsContentModal(portId, machineId) {
     const port = state.ports.find(p => p.id === portId && p.machineId === machineId);
-    const historyItem = [...(state.history || [])]
-        .filter(item => item && item.id === portId && item.machineId === machineId
-            && isAllowedZaloSmsEndpoint(item.recipient || item.smsRecipient || item.sender))
-        .sort((a, b) => getHistorySortTimestamp(b) - getHistorySortTimestamp(a))[0];
-    const latestCommandResult = Object.values(commandResults || {})
+    const webState = globalWebStates[`${machineId}_${portId}`] || {};
+    const latestCommandResult = Object.entries(commandResults || {})
+        .map(([commandId, result]) => ({ ...result, commandId }))
         .filter(result => result && result.portId === portId && result.machineId === machineId
+            && (result.commandId === webState.commandId
+                || result.commandId === webState.reservationId
+                || result.commandId === port?.commandId)
             && isAllowedZaloSmsEndpoint(result.smsRecipient || result.recipient || result.otpSender))
         .sort((a, b) => Number(b.updatedAt || b.createdAt || 0) - Number(a.updatedAt || a.createdAt || 0))[0];
-    if (!port && !historyItem && !latestCommandResult) {
+    if (!port && !latestCommandResult) {
         showToast('Không tìm thấy COM cần xem nội dung.', 'error');
         return;
     }
 
-    const webState = globalWebStates[`${machineId}_${portId}`] || {};
     const commandError = typeof latestCommandResult?.error === 'string' ? latestCommandResult.error.trim() : '';
     const legacyCarrierResponse = latestCommandResult
         && COMMAND_FAILED_STATUSES.has(latestCommandResult.status)
         && typeof latestCommandResult.result === 'string'
         ? latestCommandResult.result.trim()
         : '';
-    const currentPortSms = getAllowedZaloSmsText(port || {}, false);
+    const rawCurrentPortSms = getAllowedZaloSmsText(port || {}, false);
+    const currentPortOtp = rawCurrentPortSms ? extractOtpFromSmsText(rawCurrentPortSms) : '';
+    const currentPortSms = currentPortOtp
+        && shouldSuppressConsumedOtp(port || {}, webState, currentPortOtp)
+        ? ''
+        : rawCurrentPortSms;
+    const rawWebStateSms = getPortSmsMessage({}, webState);
+    const webStateOtp = rawWebStateSms ? extractOtpFromSmsText(rawWebStateSms) : '';
+    const currentWebStateSms = webStateOtp
+        && shouldSuppressConsumedOtp(port || {}, webState, webStateOtp)
+        ? ''
+        : rawWebStateSms;
     const message = currentPortSms || pickMostCompleteSmsText(
-        getPortSmsMessage({}, webState),
-        getAllowedZaloSmsText(historyItem, true),
+        currentWebStateSms,
         getAllowedZaloSmsText(latestCommandResult, true),
         legacyCarrierResponse,
         commandError
     );
-    const recipient = port?.smsRecipient || webState.smsRecipient || port?.lastSmsRecipient || historyItem?.recipient || latestCommandResult?.recipient || 'Chưa xác định';
-    const phoneValue = port?.phone || webState.phone || historyItem?.phone || latestCommandResult?.phone;
+    const recipient = port?.smsRecipient || webState.smsRecipient || port?.lastSmsRecipient || latestCommandResult?.recipient || 'Chưa xác định';
+    const phoneValue = port?.phone || webState.phone || latestCommandResult?.phone;
     const phone = phoneValue ? normalizePhoneNumber(phoneValue) : 'Chưa có SĐT';
 
     const title = document.getElementById('sms-detail-title');
@@ -2443,6 +2627,99 @@ async function clearCommandResults(ids) {
     await Promise.all(promises);
 }
 
+function getPortOtpToDismiss(port, webState = {}, fallbackOtp = '') {
+    return String(
+        fallbackOtp
+        || port?.otp
+        || webState.otp
+        || webState.dismissedOtp
+        || webState.hiddenOtp
+        || webState.clearedOtp
+        || ''
+    );
+}
+
+function buildResetWebState(port, webState = {}, fallbackOtp = '') {
+    const dismissedOtp = getPortOtpToDismiss(port, webState, fallbackOtp);
+    const resetState = {
+        phone: port?.phone || webState.phone || 'NONE',
+        resetAt: firebase.database.ServerValue.TIMESTAMP
+    };
+
+    if (dismissedOtp) {
+        resetState.dismissedOtp = dismissedOtp;
+        resetState.dismissedSmsRevision = Math.max(
+            Number(port?.smsRevision || 0),
+            Number(webState.smsRevision || 0),
+            Number(webState.dismissedSmsRevision || 0),
+            Number(webState.hiddenSmsRevision || 0),
+            Number(webState.awaitSmsAfterRevision || 0)
+        );
+        resetState.dismissedAt = firebase.database.ServerValue.TIMESTAMP;
+    }
+
+    return resetState;
+}
+
+function buildMachineOtpResetPayload() {
+    // ToolGSM versions have used several SMS field names. Clear every known
+    // alias so none of them can be parsed back into an already-used OTP.
+    return {
+        status: 'online',
+        otp: null,
+        smsContent: null,
+        sms_content: null,
+        smsMessage: null,
+        sms_message: null,
+        smsText: null,
+        smsBody: null,
+        otpContent: null,
+        carrierResponse: null,
+        sms: null,
+        incomingMessage: null,
+        incomingSms: null,
+        lastSmsMessage: null,
+        receivedMessage: null,
+        lastMessage: null,
+        rawMessage: null,
+        lastReply: null,
+        reply: null,
+        responseMessage: null,
+        LastContent: null,
+        errorMsg: null,
+        smsSent: null
+    };
+}
+
+function createClearOtpCommand(portId, machineId) {
+    const commandId = `${CLIENT_SESSION_ID}_clear_${machineId}_${portId}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    return db.ref(`commands/${commandId}`).set({
+        portId,
+        machineId,
+        type: 'system',
+        recipient: 'SYSTEM',
+        content: 'CLEAR_OTP',
+        status: 'queued',
+        createdAt: { '.sv': 'timestamp' }
+    });
+}
+
+function resetLocalPortToOnline(port) {
+    if (!port) return;
+    cancelOtpAutoSave(port.id, port.machineId);
+    port.otp = null;
+    port.smsContent = null;
+    port.smsSent = false;
+    port.smsSentTime = null;
+    port.commandId = null;
+    port.commandIds = null;
+    port.commandStatus = null;
+    port.errorMsg = null;
+    port.hidden = false;
+    port.isMarking = false;
+    port.status = 'online';
+}
+
 window.cancelSmsWait = async function (portId, machineId) {
     if (isImpersonating) return showToast('Bạn đang ở chế độ Chỉ Đọc', 'error');
     const stateKey = `${machineId}_${portId}`;
@@ -2458,100 +2735,130 @@ window.cancelSmsWait = async function (portId, machineId) {
     const allIdsToCancel = [...new Set([...idsToCancel, ...portResults])];
 
     const promises = [];
-    if (idsToCancel.length && COMMAND_IN_FLIGHT_STATUSES.has(webState.commandStatus)) {
-        idsToCancel.forEach(id => promises.push(db.ref(`commands/${id}`).remove()));
-    }
+    idsToCancel.forEach(id => promises.push(db.ref(`commands/${id}`).remove()));
     promises.push(clearCommandResults(allIdsToCancel));
 
     const port = state.ports.find(p => p.id === portId && p.machineId === machineId);
-    if (port && port.otp) {
-        promises.push(db.ref(`web_states/machines/${machineId}/ports/${portId}`).update({ clearedOtp: port.otp, smsSent: null, commandId: null, commandIds: null, commandStatus: null, errorMsg: null }));
-    } else {
-        promises.push(db.ref(`web_states/machines/${machineId}/ports/${portId}`).remove());
-    }
-    promises.push(db.ref(`machines/${machineId}/ports/${portId}/otp`).remove());
+    promises.push(
+        db.ref(`web_states/machines/${machineId}/ports/${portId}`)
+            .set(buildResetWebState(port, webState))
+    );
+    promises.push(
+        db.ref(`machines/${machineId}/ports/${portId}`)
+            .update(buildMachineOtpResetPayload())
+    );
 
     // Gửi lệnh CLEAR_OTP xuống toolgsm để xoá OTP hiển thị cũ dưới client C#
-    promises.push(db.ref(`commands/${CLIENT_SESSION_ID}_clear_${portId}_${Date.now()}`).set({
-        portId: portId,
-        machineId: machineId,
-        type: 'system',
-        recipient: 'SYSTEM',
-        content: 'CLEAR_OTP',
-        status: 'queued',
-        createdAt: { '.sv': 'timestamp' }
-    }));
+    promises.push(createClearOtpCommand(portId, machineId));
 
     await Promise.all(promises);
 
     // Xoá OTP trên giao diện nếu đang có
-    if (port) {
-        if (port.otp) port.otp = null;
-        port.smsSent = false;
-        port.commandId = null;
-        port.commandIds = null;
-        port.commandStatus = null;
-        port.errorMsg = null;
-        renderPorts();
-    }
+    resetLocalPortToOnline(port);
+    renderPorts();
 
     showToast(`Đã hủy chờ OTP cho cổng ${portId} (${machineId})`);
 }
 
 window.cancelAllSmsWait = async function () {
     if (isImpersonating) return showToast('Bạn đang ở chế độ Chỉ Đọc', 'error');
-    const visiblePorts = state.ports.filter(p => !p.hidden && !p.isTest && p.status === 'online');
-    if (visiblePorts.length === 0) {
-        showToast('Không có cổng nào đang hoạt động!', 'error');
+
+    // Only real ports in the current GSM snapshot count as COMs. Historical
+    // web_states may contain hundreds of orphan entries and must never inflate
+    // this number or be recreated as fake online ports.
+    const targets = new Map();
+    state.ports.filter(port => !port.isTest).forEach(port => {
+        targets.set(`${port.machineId}_${port.id}`, {
+            machineId: port.machineId,
+            portId: port.id,
+            port
+        });
+    });
+    const orphanWebStates = Object.entries(globalWebStateRefs || {})
+        .filter(([stateKey, ref]) => ref && !targets.has(stateKey))
+        .map(([stateKey, ref]) => ({ stateKey, ...ref }));
+
+    if (targets.size === 0 && orphanWebStates.length === 0) {
+        showToast('Không có trạng thái cổng nào để đặt lại!', 'error');
         return;
     }
 
-    showToast(`Đang hủy chờ OTP cho ${visiblePorts.length} cổng...`);
-    const promises = [];
-    visiblePorts.forEach(port => {
-        const webState = globalWebStates[`${port.machineId}_${port.id}`] || {};
-        const idsToCancel = Array.isArray(webState.commandIds)
-            ? webState.commandIds
-            : (webState.commandId ? [webState.commandId] : []);
+    showToast(`Đang đặt lại toàn bộ trạng thái cho ${targets.size} COM hiện tại...`);
 
-        const portResults = Object.keys(commandResults).filter(id => {
-            const res = commandResults[id];
-            return res && res.portId === port.id && res.machineId === port.machineId;
+    try {
+        const [commandsSnapshot, resultsSnapshot] = await Promise.all([
+            db.ref('commands').once('value'),
+            db.ref('command_results').once('value')
+        ]);
+        const allCommands = commandsSnapshot.val() || {};
+        const allResults = resultsSnapshot.val() || {};
+        const targetKeys = new Set([
+            ...targets.keys(),
+            ...orphanWebStates.map(item => item.stateKey)
+        ]);
+        const promises = [];
+
+        Object.entries(allCommands).forEach(([commandId, command]) => {
+            if (!command) return;
+            const key = `${command.machineId}_${command.portId}`;
+            if (targetKeys.has(key)) promises.push(db.ref(`commands/${commandId}`).remove());
         });
-        const allIdsToCancel = [...new Set([...idsToCancel, ...portResults])];
 
-        if (idsToCancel.length && COMMAND_IN_FLIGHT_STATUSES.has(webState.commandStatus)) {
+        Object.entries(allResults).forEach(([resultId, result]) => {
+            if (!result) return;
+            const key = `${result.machineId}_${result.portId}`;
+            if (!targetKeys.has(key)) return;
+            delete commandResults[resultId];
+            delete appliedCommandResults[resultId];
+            promises.push(db.ref(`command_results/${resultId}`).remove());
+        });
+
+        // Delete stale state records instead of writing a reset object back to
+        // them. They are cleanup data, not ports currently transmitted by GSM.
+        orphanWebStates.forEach(({ stateKey, machineId, portId }) => {
+            const orphanState = globalWebStates[stateKey] || {};
+            const orphanCommandIds = Array.isArray(orphanState.commandIds)
+                ? orphanState.commandIds
+                : (orphanState.commandId ? [orphanState.commandId] : []);
+            orphanCommandIds.forEach(id =>
+                promises.push(db.ref(`commands/${id}`).remove())
+            );
+            delete globalWebStates[stateKey];
+            delete globalWebStateRefs[stateKey];
+            promises.push(
+                db.ref(`web_states/machines/${machineId}/ports/${portId}`).remove()
+            );
+        });
+
+        targets.forEach(({ machineId, portId, port }, stateKey) => {
+            const webState = globalWebStates[stateKey] || {};
+            const idsToCancel = Array.isArray(webState.commandIds)
+                ? webState.commandIds
+                : (webState.commandId ? [webState.commandId] : []);
+
             idsToCancel.forEach(id => promises.push(db.ref(`commands/${id}`).remove()));
-        }
-        promises.push(clearCommandResults(allIdsToCancel));
-        if (port.otp) {
-            promises.push(db.ref(`web_states/machines/${port.machineId}/ports/${port.id}`).update({ clearedOtp: port.otp, smsSent: null, commandId: null, commandIds: null, commandStatus: null, errorMsg: null }));
-        } else {
-            promises.push(db.ref(`web_states/machines/${port.machineId}/ports/${port.id}`).remove());
-        }
-        promises.push(db.ref(`machines/${port.machineId}/ports/${port.id}/otp`).remove());
-        
-        // Gửi lệnh CLEAR_OTP xuống toolgsm
-        promises.push(db.ref(`commands/${CLIENT_SESSION_ID}_clear_${port.id}_${Date.now()}`).set({
-            portId: port.id,
-            machineId: port.machineId,
-            type: 'system',
-            recipient: 'SYSTEM',
-            content: 'CLEAR_OTP',
-            status: 'queued',
-            createdAt: { '.sv': 'timestamp' }
-        }));
-        
-        if (port.otp) port.otp = null;
-        port.smsSent = false;
-        port.commandId = null;
-        port.commandIds = null;
-        port.commandStatus = null;
-        port.errorMsg = null;
-    });
-    await Promise.all(promises);
-    renderPorts();
-    showToast(`Đã hủy chờ OTP cho ${visiblePorts.length} cổng`);
+
+            promises.push(
+                db.ref(`web_states/machines/${machineId}/ports/${portId}`)
+                    .set(buildResetWebState(port, webState))
+            );
+
+            promises.push(
+                db.ref(`machines/${machineId}/ports/${portId}`)
+                    .update(buildMachineOtpResetPayload())
+            );
+            promises.push(createClearOtpCommand(portId, machineId));
+            resetLocalPortToOnline(port);
+        });
+
+        await Promise.all(promises);
+        renderPorts();
+        renderOperationalPanels();
+        showToast(`Đã đưa ${targets.size} COM hiện tại về trạng thái Online bình thường.`);
+    } catch (error) {
+        console.error('Không thể đặt lại toàn bộ trạng thái cổng:', error);
+        showToast('Không thể hủy chờ tất cả: ' + error.message, 'error');
+    }
 }
 
 window.clearAllCommandResults = async function () {
@@ -2563,22 +2870,44 @@ window.clearAllCommandResults = async function () {
     showToast('Đã dọn sạch toàn bộ kết quả lệnh trên Firebase và giao diện.');
 }
 
-window.restoreAllHiddenPorts = function () {
+window.restoreAllHiddenPorts = async function () {
     if (isImpersonating) return showToast('Bạn đang ở chế độ Chỉ Đọc', 'error');
     let count = 0;
+    const promises = [];
     Object.keys(globalWebStates).forEach(stateKey => {
         const webState = globalWebStates[stateKey];
         if (webState.hiddenOtp) {
             const ref = globalWebStateRefs[stateKey];
             if (ref) {
-                db.ref(`web_states/machines/${ref.machineId}/ports/${ref.portId}`).remove();
+                const port = state.ports.find(item =>
+                    item.machineId === ref.machineId && item.id === ref.portId
+                );
+                promises.push(
+                    db.ref(`web_states/machines/${ref.machineId}/ports/${ref.portId}`)
+                        .set(buildResetWebState(port, webState, webState.hiddenOtp))
+                );
+                if (port) {
+                    promises.push(
+                        db.ref(`machines/${ref.machineId}/ports/${ref.portId}`)
+                            .update(buildMachineOtpResetPayload())
+                    );
+                    promises.push(createClearOtpCommand(ref.portId, ref.machineId));
+                    resetLocalPortToOnline(port);
+                }
                 count++;
             }
         }
     });
     if (count > 0) {
-        showToast(`Đã khôi phục ${count} cổng ẩn.`);
+        try {
+            await Promise.all(promises);
+        } catch (error) {
+            console.error('Không thể khôi phục toàn bộ cổng ẩn:', error);
+            showToast('Không thể khôi phục tất cả cổng ẩn: ' + error.message, 'error');
+            return;
+        }
         renderPorts();
+        showToast(`Đã khôi phục ${count} cổng ẩn; OTP cũ vẫn bị chặn.`);
     } else {
         showToast('Không có cổng nào đang bị ẩn.', 'error');
     }
@@ -2663,15 +2992,25 @@ async function markAsUsed(portId, machineId) {
             }
 
             // Đồng bộ trạng thái ẨN cho mọi người
-            db.ref(`web_states/machines/${port.machineId}/ports/${port.id}`).update({
+            await db.ref(`web_states/machines/${port.machineId}/ports/${port.id}`).update({
                 hiddenOtp: port.otp || 'NONE',
+                hiddenSmsRevision: Number(port.smsRevision || 0),
+                dismissedOtp: port.otp || 'NONE',
+                dismissedSmsRevision: Number(port.smsRevision || 0),
+                dismissedAt: firebase.database.ServerValue.TIMESTAMP,
                 phone: port.phone || 'NONE',
                 hiddenByAuto: false,
                 hiddenMode: 'manual',
                 hiddenAction: TAKE_OTP_HIDE_ACTION,
                 hiddenAt: firebase.database.ServerValue.TIMESTAMP,
+                otp: null,
+                otpReceivedAt: null,
+                smsContent: null,
+                smsContentAt: null,
                 smsSent: false,
                 smsSentTime: null,
+                commandId: null,
+                commandIds: null,
                 commandStatus: null,
                 errorMsg: null
             });
@@ -2683,33 +3022,49 @@ async function markAsUsed(portId, machineId) {
     }
 }
 
-function restoreFromHistory(portId, machineId, usedTime, fbKey) {
+async function restoreFromHistory(portId, machineId, usedTime, fbKey) {
     if (isImpersonating) return showToast('Bạn đang ở chế độ Chỉ Đọc', 'error');
-    // Xoá trạng thái ẩn trên Firebase cho tất cả mọi người
-    db.ref(`web_states/machines/${machineId}/ports/${portId}`).remove();
-
-    // Cập nhật state local
     const port = state.ports.find(p => p.id === portId && p.machineId === machineId);
-    if (port) {
-        port.hidden = false;
-        port.smsSent = false;
-        port.isMarking = false; // Reset cờ trạng thái
-    }
+    const webState = globalWebStates[`${machineId}_${portId}`] || {};
+    const historyItem = state.history.find(item => {
+        if (fbKey && fbKey !== 'undefined' && item.fbKey === fbKey) return true;
+        return item.id === portId
+            && item.machineId === machineId
+            && item.usedTime === usedTime;
+    });
+    const dismissedOtp = getPortOtpToDismiss(port, webState, historyItem?.otp || '');
 
-    // Xóa entry khỏi lịch sử trên Firebase
-    if (fbKey && fbKey !== 'undefined') {
-        db.ref(tenantPath(`history/${fbKey}`)).remove();
-    } else {
-        // Fallback cho dữ liệu cũ từ localStorage chưa có fbKey
-        const indexToRemove = state.history.findIndex(h => h.id === portId && h.usedTime === usedTime);
-        if (indexToRemove > -1) {
-            state.history.splice(indexToRemove, 1);
-            localStorage.setItem(tenantStorageKey('gsm_history'), JSON.stringify(state.history));
-            renderHistory();
+    try {
+        const promises = [
+            db.ref(`web_states/machines/${machineId}/ports/${portId}`)
+                .set(buildResetWebState(port, webState, dismissedOtp)),
+            db.ref(`machines/${machineId}/ports/${portId}`)
+                .update(buildMachineOtpResetPayload()),
+            createClearOtpCommand(portId, machineId)
+        ];
+
+        if (fbKey && fbKey !== 'undefined') {
+            promises.push(db.ref(tenantPath(`history/${fbKey}`)).remove());
+        } else {
+            // Fallback cho dữ liệu cũ từ localStorage chưa có fbKey
+            const indexToRemove = state.history.findIndex(h =>
+                h.id === portId && h.machineId === machineId && h.usedTime === usedTime
+            );
+            if (indexToRemove > -1) {
+                state.history.splice(indexToRemove, 1);
+                localStorage.setItem(tenantStorageKey('gsm_history'), JSON.stringify(state.history));
+            }
         }
-    }
 
-    showToast(`Đã khôi phục cổng ${portId} (${machineId}) về trạng thái đang hoạt động.`);
+        await Promise.all(promises);
+        resetLocalPortToOnline(port);
+        renderHistory();
+        renderPorts();
+        showToast(`Đã khôi phục cổng ${portId} (${machineId}) về Online; OTP cũ vẫn bị chặn.`);
+    } catch (error) {
+        console.error('Không thể khôi phục cổng từ lịch sử:', error);
+        showToast('Không thể khôi phục cổng: ' + error.message, 'error');
+    }
 }
 
 // Simulation helpers
@@ -3929,17 +4284,20 @@ function checkConnectionStatus() {
     const now = Date.now() + serverTimeOffset;
     let hasChanges = false;
 
-    // Loại bỏ các cổng của máy tính đã chết (không có ping trong 15s)
+    // Chỉ loại bỏ cổng sau khi máy mất heartbeat liên tục đủ lâu. Trong thời
+    // gian xác nhận, giữ nguyên Online để giao diện không nhấp nháy On/Off.
     const connectedOrBusyPorts = state.ports.filter(p => {
         if (p.isTest) return true;
         const lastSync = lastSyncByMachine[p.machineId] || 0;
         const heartbeatAge = now - lastSync;
-        const isAlive = heartbeatAge <= MACHINE_HEARTBEAT_TIMEOUT_MS;
-        const keepStableDuringActiveUi = heartbeatAge <= MACHINE_ACTIVE_UI_GRACE_MS
-            && (hasActivePortWork(p) || Boolean(p.otp));
+        const isAlive = heartbeatAge <= MACHINE_OFFLINE_CONFIRM_MS;
         if (p.connectionStale !== !isAlive) hasChanges = true;
         p.connectionStale = !isAlive;
-        return isAlive || keepStableDuringActiveUi;
+        if (isAlive && p.status !== 'online') {
+            p.status = 'online';
+            hasChanges = true;
+        }
+        return isAlive;
     });
 
     if (connectedOrBusyPorts.length !== state.ports.length) {
@@ -3957,7 +4315,7 @@ function checkConnectionStatus() {
 
     let isAnyAlive = false;
     Object.values(lastSyncByMachine).forEach(sync => {
-        if (now - sync <= MACHINE_HEARTBEAT_TIMEOUT_MS) isAnyAlive = true;
+        if (now - sync <= MACHINE_OFFLINE_CONFIRM_MS) isAnyAlive = true;
     });
 
     // Nếu không có máy nào sống
@@ -5160,7 +5518,7 @@ function processDashboardMetrics(historyData, tenantTarget) {
     const serverNow = Date.now() + serverTimeOffset;
     const aliveMachines = new Set();
     Object.keys(lastSyncByMachine).forEach(mId => {
-        if (serverNow - lastSyncByMachine[mId] <= MACHINE_HEARTBEAT_TIMEOUT_MS) aliveMachines.add(mId);
+        if (serverNow - lastSyncByMachine[mId] <= MACHINE_OFFLINE_CONFIRM_MS) aliveMachines.add(mId);
     });
     onlineDevices = aliveMachines.size;
     
@@ -5625,7 +5983,7 @@ window.showDashStatDetails = function(type, isFilterClick = false) {
         const serverNow = Date.now() + serverTimeOffset;
         const aliveMachines = [];
         Object.keys(lastSyncByMachine).forEach(mId => {
-            if (serverNow - lastSyncByMachine[mId] <= MACHINE_HEARTBEAT_TIMEOUT_MS) aliveMachines.push(mId);
+            if (serverNow - lastSyncByMachine[mId] <= MACHINE_OFFLINE_CONFIRM_MS) aliveMachines.push(mId);
         });
         
         title.textContent = `Thiết bị đang Online (${aliveMachines.length})`;

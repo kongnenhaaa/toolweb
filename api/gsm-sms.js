@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { getAdminDb } from '../lib/firebaseAdmin.js';
 import {
     buildGsmCommand,
+    buildGsmBridgeStatus,
     findGsmBridgePorts,
     validateGsmBridgeRequest
 } from '../lib/gsmBridge.js';
@@ -52,38 +53,46 @@ async function readStatus(requestId) {
         db.ref(`commands/${requestId}`).once('value')
     ]);
     const result = resultSnapshot.val();
-    if (result && typeof result === 'object') {
-        const rawStatus = String(result.status || 'done').toLowerCase();
-        const ok = ['sent', 'done', 'success', 'otp_received'].includes(rawStatus);
-        return {
-            found: true,
-            payload: {
-                ok,
-                requestId,
-                status: rawStatus,
-                portName: result.portId || '',
-                machineId: result.machineId || '',
-                result: result.result || '',
-                errorCode: ok ? '' : rawStatus,
-                error: result.error || result.errorMsg || ''
-            }
-        };
-    }
     const command = commandSnapshot.val();
-    if (command && typeof command === 'object') {
-        return {
-            found: true,
-            payload: {
-                ok: false,
-                requestId,
-                status: command.status || 'queued',
-                portName: command.portId || '',
-                machineId: command.machineId || '',
-                queued: true
-            }
-        };
+    let machineId = String(result?.machineId || command?.machineId || '').trim();
+    let portId = String(result?.portId || command?.portId || '').trim();
+    let webState = null;
+    if (machineId && portId) {
+        const webStateSnapshot = await db.ref(
+            `web_states/machines/${machineId}/ports/${portId}`
+        ).once('value');
+        webState = webStateSnapshot.val();
     }
-    return { found: false, payload: null };
+    if (!webState) {
+        if (machineId) {
+            const machinePortsSnapshot = await db.ref(`web_states/machines/${machineId}/ports`).once('value');
+            const ports = machinePortsSnapshot.val() || {};
+            for (const [pId, pNode] of Object.entries(ports)) {
+                if (pNode && (String(pNode.commandId || '') === requestId || String(pNode.reservationId || '') === requestId)) {
+                    webState = pNode;
+                    portId = pId;
+                    break;
+                }
+            }
+        }
+        if (!webState) {
+            const allMachinesSnapshot = await db.ref('web_states/machines').once('value');
+            const machines = allMachinesSnapshot.val() || {};
+            for (const [mId, mNode] of Object.entries(machines)) {
+                const ports = mNode?.ports || {};
+                for (const [pId, pNode] of Object.entries(ports)) {
+                    if (pNode && (String(pNode.commandId || '') === requestId || String(pNode.reservationId || '') === requestId)) {
+                        webState = pNode;
+                        machineId = mId;
+                        portId = pId;
+                        break;
+                    }
+                }
+                if (webState) break;
+            }
+        }
+    }
+    return buildGsmBridgeStatus(requestId, result, command, webState);
 }
 
 export default async function handler(req, res) {
