@@ -270,6 +270,14 @@ function normalizePhoneNumber(phone) {
     return String(phone).replace(/\s+/g, '').trim();
 }
 
+function normalizeVietnamSmsRecipient(value) {
+    const raw = String(value ?? '').replace(/\s+/g, '').trim();
+    const digits = raw.replace(/\D/g, '');
+    if (/^84\d{9,10}$/.test(digits)) return `0${digits.slice(2)}`;
+    if (/^0\d{9,10}$/.test(digits)) return digits;
+    return raw;
+}
+
 function isMissingPortDisplayValue(value) {
     const normalized = normalizeText(value).replace(/\s+/g, ' ').trim();
     return !normalized
@@ -2231,7 +2239,7 @@ async function executeSendSms() {
     if (recipient === 'custom') {
         recipient = document.getElementById('sms-recipient-custom').value;
     }
-    recipient = (recipient || '').trim();
+    recipient = normalizeVietnamSmsRecipient(recipient);
 
     if (!recipient) {
         showToast('Vui lòng nhập đầu số nhận!', 'error');
