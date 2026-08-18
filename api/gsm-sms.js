@@ -151,7 +151,30 @@ export default async function handler(req, res) {
 
         const db = getAdminDb();
         const machinesSnapshot = await db.ref('machines').once('value');
-        const matches = findGsmBridgePorts(machinesSnapshot.val(), request);
+        const machinesVal = machinesSnapshot.val();
+
+        // --- DEBUG LOG ---
+        console.log('[gsm-sms] sourcePhone:', request.sourcePhone);
+        if (machinesVal && typeof machinesVal === 'object') {
+            for (const [mid, mnode] of Object.entries(machinesVal)) {
+                const ls = mnode?.server_status?.lastSync || mnode?.lastSync || 0;
+                const age = Date.now() - Number(ls);
+                console.log(`[gsm-sms] machine=${mid} lastSync=${ls} age=${age}ms`);
+                if (mnode?.ports && typeof mnode.ports === 'object') {
+                    for (const [pid, pnode] of Object.entries(mnode.ports)) {
+                        if (pnode && typeof pnode === 'object') {
+                            console.log(`[gsm-sms]   port=${pid} status=${pnode.status} phone=${pnode.phone||pnode.phoneNumber||pnode.number||'?'}`);
+                        }
+                    }
+                }
+            }
+        } else {
+            console.log('[gsm-sms] machines data is null/empty!');
+        }
+        // --- END DEBUG ---
+
+        const matches = findGsmBridgePorts(machinesVal, request);
+        console.log('[gsm-sms] matches count:', matches.length);
         if (matches.length === 0) {
             sendError(
                 res,
