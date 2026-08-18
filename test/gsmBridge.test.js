@@ -58,7 +58,7 @@ test('selects the exact online source SIM on a live machine', () => {
             }
         },
         STALE_PC: {
-            server_status: { lastSync: now - 60_000 },
+            server_status: { lastSync: now - 600_000 },
             ports: {
                 COM1: { id: 'COM1', phone: '0912345678', status: 'online' }
             }
