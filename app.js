@@ -576,10 +576,11 @@ function latchReceivedOtpState(port, webState, otp, smsText = '') {
     stateRef.transaction(current => {
         current = current || {};
 
-        // Once the operator presses "Đã lấy OTP", recurring machine snapshots
+        // Once the operator presses "Đã lấy OTP" or "Hủy chờ", recurring machine snapshots
         // containing that same OTP are not allowed to make the COM reappear.
         if (isPortHiddenByTakeOtpButton(current, otp)
             && !isFreshOtpFromGsm(port, current, otp)) return;
+        if (shouldSuppressConsumedOtp(port, current, otp)) return;
 
         const currentIsAlreadyLatched = String(current.otp || '') === String(otp)
             && current.smsSent !== true
@@ -1630,7 +1631,7 @@ function applyWebStates() {
             errorMsg = null;
             port.smsSentTime = null;
             shouldHide = hiddenByTakeOtpButton;
-            if (!hiddenByTakeOtpButton) {
+            if (!hiddenByTakeOtpButton && !shouldSuppressConsumedOtp(port, webState, port.otp)) {
                 latchReceivedOtpState(port, webState, port.otp, incomingSmsText);
             }
         }
@@ -2628,34 +2629,49 @@ async function clearCommandResults(ids) {
 }
 
 function getPortOtpToDismiss(port, webState = {}, fallbackOtp = '') {
+    if (fallbackOtp) return String(fallbackOtp);
+    if (port?.otp) return String(port.otp);
+    if (webState?.otp) return String(webState.otp);
+
+    const smsText = (typeof getAllowedZaloSmsText === 'function' ? getAllowedZaloSmsText(port, false) : '')
+        || (typeof getPortSmsMessage === 'function' ? getPortSmsMessage(port, webState) : '')
+        || port?.smsContent
+        || port?.sms_content
+        || port?.smsMessage
+        || port?.rawMessage
+        || webState?.smsContent
+        || '';
+    const extracted = typeof extractOtpFromSmsText === 'function' ? extractOtpFromSmsText(smsText) : '';
+    if (extracted) return String(extracted);
+
     return String(
-        fallbackOtp
-        || port?.otp
-        || webState.otp
-        || webState.dismissedOtp
-        || webState.hiddenOtp
-        || webState.clearedOtp
+        webState?.dismissedOtp
+        || webState?.hiddenOtp
+        || webState?.clearedOtp
         || ''
     );
 }
 
 function buildResetWebState(port, webState = {}, fallbackOtp = '') {
     const dismissedOtp = getPortOtpToDismiss(port, webState, fallbackOtp);
+    const maxRevision = Math.max(
+        Number(port?.smsRevision || 0),
+        Number(webState?.smsRevision || 0),
+        Number(webState?.dismissedSmsRevision || 0),
+        Number(webState?.hiddenSmsRevision || 0),
+        Number(webState?.awaitSmsAfterRevision || 0)
+    );
     const resetState = {
-        phone: port?.phone || webState.phone || 'NONE',
+        phone: port?.phone || webState?.phone || 'NONE',
         resetAt: firebase.database.ServerValue.TIMESTAMP
     };
 
     if (dismissedOtp) {
         resetState.dismissedOtp = dismissedOtp;
-        resetState.dismissedSmsRevision = Math.max(
-            Number(port?.smsRevision || 0),
-            Number(webState.smsRevision || 0),
-            Number(webState.dismissedSmsRevision || 0),
-            Number(webState.hiddenSmsRevision || 0),
-            Number(webState.awaitSmsAfterRevision || 0)
-        );
+        resetState.dismissedSmsRevision = maxRevision;
         resetState.dismissedAt = firebase.database.ServerValue.TIMESTAMP;
+        resetState.clearedOtp = dismissedOtp;
+        resetState.awaitSmsAfterRevision = maxRevision;
     }
 
     return resetState;
@@ -2709,6 +2725,9 @@ function resetLocalPortToOnline(port) {
     cancelOtpAutoSave(port.id, port.machineId);
     port.otp = null;
     port.smsContent = null;
+    port.sms_content = null;
+    port.smsMessage = null;
+    port.rawMessage = null;
     port.smsSent = false;
     port.smsSentTime = null;
     port.commandId = null;
@@ -3255,6 +3274,10 @@ document.getElementById('nav-history').addEventListener('click', (e) => {
 
     const pageTitle = document.getElementById('page-title');
     if (pageTitle) pageTitle.textContent = 'Lịch sử OTP';
+    const clearHistoryBtn = document.getElementById('btn-admin-clear-history');
+    if (clearHistoryBtn) {
+        clearHistoryBtn.style.display = (!isImpersonating) ? 'inline-flex' : 'none';
+    }
     reloadHistoryAndRender();
 });
 
@@ -3794,6 +3817,7 @@ window.openAdminLogsModal = async function() {
                 case 'HARD_DELETE': actionText = 'Xoá Cứng Vĩnh Viễn'; actionColor = 'var(--danger)'; break;
                 case 'RESTORE_USER': actionText = 'Khôi phục User'; actionColor = 'var(--success)'; break;
                 case 'RESET_PASSWORD': actionText = 'Reset Mật khẩu'; actionColor = 'var(--warning)'; break;
+                case 'CLEAR_GSM_HISTORY': actionText = 'Xóa Lịch Sử GSM Local'; actionColor = 'var(--danger)'; break;
             }
             
             let byEmail = item.adminEmail || item.by || 'N/A';
@@ -3948,6 +3972,197 @@ window.adminResetPassword = async function(email) {
     }
 }
 
+async function adminClearGsmLocalHistory(targetCustomerId = null) {
+    if (typeof isImpersonating !== 'undefined' && isImpersonating) {
+        return showToast('Bạn đang ở chế độ Chỉ Đọc (Impersonate)', 'error');
+    }
+    if (!currentUserProfile) {
+        return showToast('Vui lòng đăng nhập để thực hiện thao tác này', 'error');
+    }
+
+    const isAdmin = currentUserProfile.role === 'admin';
+    const isCustomer = !isAdmin;
+
+    // Customer can only clear their own history
+    const isGlobal = isAdmin && !targetCustomerId;
+    const targetId = isCustomer ? currentUserProfile.customerId : (targetCustomerId || null);
+
+    let confirmMessage = '';
+    if (isGlobal) {
+        confirmMessage = `CẢNH BÁO: Bạn có chắc chắn muốn XÓA TẤT CẢ lịch sử OTP của API GSM Local của toàn bộ khách hàng và hệ thống?\n\n• Toàn bộ lịch sử OTP từ GSM Local sẽ bị xóa vĩnh viễn.\n• Lịch sử Firefox API sẽ được GIỮ LẠI NGUYÊN VẸN, không bị xóa.\n• Hành động này không thể hoàn tác.`;
+    } else if (isAdmin && targetCustomerId) {
+        confirmMessage = `Bạn có chắc chắn muốn xóa toàn bộ lịch sử OTP GSM Local của khách hàng [${targetCustomerId}]?\n\n• Lịch sử Firefox API của khách này sẽ được GIỮ LẠI NGUYÊN VẸN.`;
+    } else {
+        confirmMessage = `Bạn có chắc chắn muốn xóa toàn bộ lịch sử OTP của API GSM Local của tài khoản bạn?\n\n• Toàn bộ lịch sử OTP từ GSM Local của bạn sẽ bị xóa vĩnh viễn.\n• Lịch sử Firefox API sẽ được GIỮ LẠI NGUYÊN VẸN, không bị xóa.\n• Hành động này không thể hoàn tác.`;
+    }
+
+    if (!(await showConfirm(confirmMessage))) return;
+
+    try {
+        showToast('Đang tiến hành xóa lịch sử OTP GSM Local...', 'info');
+
+        let totalRemoved = 0;
+        let affectedTenants = 0;
+
+        if (isGlobal) {
+            const tenantsSnap = await db.ref('tenants').once('value');
+            const tenantsData = tenantsSnap.val() || {};
+            
+            const tenantIdSet = new Set(Object.keys(tenantsData));
+            if (adminUsersData) {
+                Object.values(adminUsersData).forEach(u => {
+                    if (u?.customerId) tenantIdSet.add(u.customerId);
+                });
+            }
+            if (currentUserProfile.customerId) {
+                tenantIdSet.add(currentUserProfile.customerId);
+            }
+
+            for (const tId of tenantIdSet) {
+                let historyObj = tenantsData[tId]?.history;
+                if (!historyObj) {
+                    try {
+                        const hSnap = await db.ref(`tenants/${tId}/history`).once('value');
+                        historyObj = hSnap.val();
+                    } catch {}
+                }
+                if (!historyObj || typeof historyObj !== 'object') continue;
+
+                const remainingHistory = {};
+                let tenantRemovedCount = 0;
+
+                Object.entries(historyObj).forEach(([k, item]) => {
+                    const isFirefox = item && (item.source === 'firefox' || item.machineId === 'FIREFOX_API' || String(k).startsWith('FIREFOX_'));
+                    if (isFirefox) {
+                        remainingHistory[k] = item;
+                    } else {
+                        tenantRemovedCount++;
+                    }
+                });
+
+                if (tenantRemovedCount > 0) {
+                    totalRemoved += tenantRemovedCount;
+                    affectedTenants++;
+                    if (Object.keys(remainingHistory).length > 0) {
+                        await db.ref(`tenants/${tId}/history`).set(remainingHistory);
+                    } else {
+                        await db.ref(`tenants/${tId}/history`).remove();
+                    }
+                }
+            }
+        } else {
+            const effectiveTenantId = targetId || currentUserProfile.customerId;
+            const historySnap = await db.ref(`tenants/${effectiveTenantId}/history`).once('value');
+            const historyObj = historySnap.val();
+            if (historyObj && typeof historyObj === 'object') {
+                const remainingHistory = {};
+                let tenantRemovedCount = 0;
+
+                Object.entries(historyObj).forEach(([k, item]) => {
+                    const isFirefox = item && (item.source === 'firefox' || item.machineId === 'FIREFOX_API' || String(k).startsWith('FIREFOX_'));
+                    if (isFirefox) {
+                        remainingHistory[k] = item;
+                    } else {
+                        tenantRemovedCount++;
+                    }
+                });
+
+                if (tenantRemovedCount > 0) {
+                    totalRemoved += tenantRemovedCount;
+                    affectedTenants = 1;
+                    if (Object.keys(remainingHistory).length > 0) {
+                        await db.ref(`tenants/${effectiveTenantId}/history`).set(remainingHistory);
+                    } else {
+                        await db.ref(`tenants/${effectiveTenantId}/history`).remove();
+                    }
+                }
+            }
+        }
+
+        // Cập nhật bộ nhớ state.history
+        if (state && Array.isArray(state.history)) {
+            state.history = state.history.filter(item => item && (item.source === 'firefox' || item.machineId === 'FIREFOX_API'));
+        }
+
+        // Dọn dẹp localStorage
+        try {
+            for (let i = localStorage.length - 1; i >= 0; i--) {
+                const key = localStorage.key(i);
+                if (key && (key.startsWith('gsm_history') || key.includes('gsm_history'))) {
+                    const raw = localStorage.getItem(key);
+                    if (raw) {
+                        try {
+                            const parsed = JSON.parse(raw);
+                            if (Array.isArray(parsed)) {
+                                const kept = parsed.filter(item => item && (item.source === 'firefox' || item.machineId === 'FIREFOX_API'));
+                                if (kept.length > 0) {
+                                    localStorage.setItem(key, JSON.stringify(kept));
+                                } else {
+                                    localStorage.removeItem(key);
+                                }
+                            }
+                        } catch {
+                            localStorage.removeItem(key);
+                        }
+                    }
+                }
+            }
+        } catch (e) {
+            console.warn('Lỗi dọn localStorage gsm_history:', e);
+        }
+
+        // Ghi nhật ký Admin (chỉ khi là Admin)
+        if (isAdmin) {
+            try {
+                await db.ref('admin_logs').push({
+                    action: 'CLEAR_GSM_HISTORY',
+                    targetEmail: isGlobal ? 'TOÀN BỘ HỆ THỐNG' : (adminUsersData && Object.values(adminUsersData).find(u => u.customerId === targetCustomerId)?.email || targetCustomerId),
+                    adminEmail: currentUserProfile.email || auth.currentUser?.email || 'Admin',
+                    by: auth.currentUser ? auth.currentUser.uid : 'admin',
+                    details: isGlobal
+                        ? `Đã xóa ${totalRemoved} bản ghi OTP GSM Local của ${affectedTenants} tài khoản (Giữ lại toàn bộ lịch sử Firefox API)`
+                        : `Đã xóa ${totalRemoved} bản ghi OTP GSM Local của khách [${targetCustomerId}] (Giữ lại lịch sử Firefox API)`,
+                    timestamp: firebase.database.ServerValue.TIMESTAMP
+                });
+            } catch (logErr) {
+                console.warn('Lỗi ghi admin_logs:', logErr);
+            }
+        }
+
+        // Cập nhật UI
+        if (typeof renderHistory === 'function') renderHistory();
+        if (isAdmin && typeof renderAdminUsers === 'function') {
+            try {
+                const tenantsSnap = await db.ref('tenants').once('value');
+                adminStatsData = tenantsSnap.val() || {};
+            } catch {}
+            renderAdminUsers();
+        }
+
+        const dashSelect = document.getElementById('dashboard-tenant-select');
+        if (dashSelect && typeof loadDashboardData === 'function') {
+            loadDashboardData(dashSelect.value || 'all');
+        }
+
+        showToast(`Đã xóa thành công ${totalRemoved} bản ghi lịch sử OTP GSM Local! Toàn bộ lịch sử Firefox API vẫn được giữ nguyên.`, 'success');
+    } catch (error) {
+        console.error('Lỗi khi xóa lịch sử GSM Local:', error);
+        showToast('Lỗi khi xóa lịch sử GSM Local: ' + error.message, 'error');
+    }
+}
+window.adminClearGsmLocalHistory = adminClearGsmLocalHistory;
+window.clearGsmLocalHistory = adminClearGsmLocalHistory;
+
+async function adminClearGsmLocalHistoryForModalUser() {
+    const uid = document.getElementById('edit-user-uid')?.value;
+    if (!uid) return;
+    const u = adminUsersData[uid];
+    if (!u || !u.customerId) return showToast('Không tìm thấy thông tin khách hàng', 'error');
+    
+    await adminClearGsmLocalHistory(u.customerId);
+}
+window.adminClearGsmLocalHistoryForModalUser = adminClearGsmLocalHistoryForModalUser;
+
 window.viewUserStats = function(customerId) {
     const navDashboardBtn = document.getElementById('nav-dashboard');
     if (navDashboardBtn) {
@@ -4072,6 +4287,7 @@ auth.onAuthStateChanged(async (user) => {
             // RBAC: Show/hide Admin and Dashboard tabs
             const navAdmin = document.getElementById('nav-admin');
             const navDashboard = document.getElementById('nav-dashboard');
+            const btnAdminClearHistory = document.getElementById('btn-admin-clear-history');
             if (currentUserProfile.role === 'admin') {
                 if (navAdmin) navAdmin.style.display = 'flex';
                 if (navDashboard) navDashboard.style.display = 'flex';
@@ -4079,6 +4295,7 @@ auth.onAuthStateChanged(async (user) => {
                 if (navAdmin) navAdmin.style.display = 'none';
                 if (navDashboard) navDashboard.style.display = 'none';
             }
+            if (btnAdminClearHistory) btnAdminClearHistory.style.display = 'inline-flex';
             
             showToast(`Xin chào, ID của bạn là: ${currentUserProfile.customerId}`);
             

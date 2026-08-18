@@ -264,3 +264,35 @@ test('cancel all resets current ports and deletes web-state-only orphan records'
     assert.equal(writes.some(item => item.method === 'remove' && item.path === 'command_results/result1'), true);
     assert.equal(writes.some(item => item.method === 'remove' && item.path === 'commands/unrelated'), false);
 });
+
+test('cancel all prevents recurring machine OTP from reappearing or latching after reload', () => {
+    const { buildResetWebState, getPortOtpToDismiss } = loadResetHelpers();
+    const { shouldSuppressConsumedOtp } = loadFreshnessHelpers();
+
+    const samplePort = {
+        machineId: 'PC_A',
+        id: 'COM1',
+        phone: '0901234567',
+        smsContent: 'Ma xac thuc Zalo la 888999',
+        otp: '888999',
+        smsRevision: 5
+    };
+
+    const dismissed = getPortOtpToDismiss(samplePort, {});
+    assert.equal(dismissed, '888999');
+
+    const resetState = buildResetWebState(samplePort, {});
+    assert.equal(resetState.dismissedOtp, '888999');
+    assert.equal(resetState.dismissedSmsRevision, 5);
+
+    // When page is reloaded and machine snapshot brings back the same OTP 888999 with same smsRevision 5:
+    const recurringPort = {
+        machineId: 'PC_A',
+        id: 'COM1',
+        phone: '0901234567',
+        smsRevision: 5
+    };
+    const shouldSuppress = shouldSuppressConsumedOtp(recurringPort, resetState, '888999');
+    assert.equal(shouldSuppress, true, 'OTP must be suppressed after cancel all');
+});
+
